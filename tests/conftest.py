@@ -3,19 +3,41 @@
 from __future__ import annotations
 
 import logging
+import os
 import socket
 import threading
 import time
+import warnings
 from collections.abc import Iterator
 
-import pytest
-import uvicorn
+# Silence HuggingFace hub noise BEFORE any module that imports it, so stdout
+# stays clean for CliRunner tests (Click/Typer merges stderr into r.output).
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+for _name in ("huggingface_hub", "huggingface_hub.utils._http"):
+    logging.getLogger(_name).setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", module=r"huggingface_hub(\..*)?")
 
-from pais.client import PaisClient
-from pais.transport.fake_transport import FakeTransport
-from pais.transport.httpx_transport import HttpxTransport
-from pais_mock.server import build_app
-from pais_mock.state import Store
+import pytest  # noqa: E402
+import uvicorn  # noqa: E402
+
+from pais.client import PaisClient  # noqa: E402
+from pais.transport.fake_transport import FakeTransport  # noqa: E402
+from pais.transport.httpx_transport import HttpxTransport  # noqa: E402
+from pais_mock.server import build_app  # noqa: E402
+from pais_mock.state import Store  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _warm_tokenizer() -> None:
+    """Pre-load the bge-small tokenizer once, before any CliRunner-captured test,
+    so the one-time download warning fires outside stdout capture."""
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        from pais.dev.token_budget import token_count
+
+        token_count("warmup")
 
 
 @pytest.fixture(autouse=True)
