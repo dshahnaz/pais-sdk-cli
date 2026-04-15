@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import threading
 import time
@@ -15,6 +16,21 @@ from pais.transport.fake_transport import FakeTransport
 from pais.transport.httpx_transport import HttpxTransport
 from pais_mock.server import build_app
 from pais_mock.state import Store
+
+
+@pytest.fixture(autouse=True)
+def _reset_stdlib_logging_handlers() -> Iterator[None]:
+    """Prevent stdlib logging handlers bound to a stale stderr from leaking
+    between tests (they cause 'Logging error' lines that pollute CliRunner
+    output when the captured stream has been rotated)."""
+    yield
+    import contextlib
+
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        with contextlib.suppress(Exception):
+            h.close()
 
 
 def _find_free_port() -> int:

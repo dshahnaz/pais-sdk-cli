@@ -51,6 +51,38 @@ export PAIS_CLIENT_ID=... PAIS_USERNAME=... PAIS_PASSWORD=...
 uv run pais kb list
 ```
 
+## Ingest test suites
+
+Feed ~300 structured markdown test-suite files into a PAIS KB with budget-safe chunking. Each suite file is split per-section, prefixed with a breadcrumb header (suite + section name + kind), and uploaded as one document per section. Every emitted file is validated against a 400-token cap (measured with the same `BAAI/bge-small-en-v1.5` tokenizer PAIS uses) so one file = one chunk — no silent server-side re-splitting. See [`docs/ingestion.md`](docs/ingestion.md) for the full design.
+
+```bash
+# install dev extras (adds the tokenizers dep used by the splitter)
+uv sync --all-extras
+
+# 0. create KB + index (chunk_size is in tokens, not chars)
+pais kb create --name test-suites --output json       # → kb_id
+pais index create <kb_id> --name ts-idx \
+    --embeddings-model BAAI/bge-small-en-v1.5 \
+    --chunk-size 512 --chunk-overlap 64 --output json # → ix_id
+
+# 1. dry-run: split one file to disk and inspect
+pais-dev split-suite ./suites/Access-Management.md --out ./out/
+
+# 2. split + upload one suite
+pais-dev ingest-suite ./suites/Access-Management.md --kb <kb_id> --index <ix_id>
+
+# 3. bulk: walk a directory, parallelize, write a JSON report
+pais-dev ingest-suites ./suites/ --kb <kb_id> --index <ix_id> \
+    --workers 4 --report ./ingest-report.json
+
+# 4. wait for indexing
+pais index wait <kb_id> <ix_id>
+```
+
+**Content hygiene**: bodies are uploaded as-is. Scrub internal hostnames / IPs / credentials from suite files before ingesting into any shared PAIS deployment — the structured logger redacts secret-looking *keys* but cannot sanitize arbitrary prose.
+
+**Idempotency (current limitation)**: re-running `ingest-suites` against the same directory creates duplicates — PAIS assigns new `document_id`s to the same `origin_name`s. For a clean re-ingest, delete the KB and recreate it. A `--replace` flag is planned.
+
 ## Logging & troubleshooting
 
 - Logs: `~/.pais/logs/pais.log` (rotating, 5MB × 3).
