@@ -1,0 +1,13 @@
+{
+  "id": "idx_xyz789",
+  "object": "index",
+  "created_at": 1712345700,
+  "kb_id": "kb_abc123",
+  "name": "test-index",
+  "description": "Index for Python code embeddings",
+  "embeddings_model_endpoint": "BAAI/bge-small-en-v1.5",
+  "text_splitting": "SENTENCE",
+  "chunk_size": 400,
+  "chunk_overlap": 100,
+  "status": "AVAILABLE"
+}

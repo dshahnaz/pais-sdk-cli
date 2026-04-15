@@ -1,0 +1,20 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "openai/gpt-oss-120b-4x",
+      "object": "model",
+      "model_type": "COMPLETIONS",
+      "model_engine": "VLLM",
+      "owned_by": "pais"
+    },
+    {
+      "id": "BAAI/bge-small-en-v1.5",
+      "object": "model",
+      "model_type": "EMBEDDINGS",
+      "model_engine": "INFINITY",
+      "owned_by": "pais"
+    }
+  ],
+  "has_more": false
+}

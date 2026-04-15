@@ -1,0 +1,9 @@
+{
+  "id": "ixn_001",
+  "object": "indexing",
+  "created_at": 1712345710,
+  "index_id": "idx_xyz789",
+  "state": "DONE",
+  "started_at": 1712345711,
+  "finished_at": 1712345750
+}

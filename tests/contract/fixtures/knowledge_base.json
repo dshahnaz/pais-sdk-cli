@@ -1,0 +1,11 @@
+{
+  "id": "kb_abc123",
+  "object": "knowledge_base",
+  "created_at": 1712345678,
+  "name": "test-kb",
+  "description": "Knowledge base for Python code analysis",
+  "data_origin_type": "LOCAL_FILES",
+  "index_refresh_policy": {
+    "policy_type": "MANUAL"
+  }
+}

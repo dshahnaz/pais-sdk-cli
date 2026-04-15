@@ -1,0 +1,9 @@
+{
+  "detail": [
+    {
+      "error_code": "value_error.missing",
+      "loc": ["body", "name"],
+      "msg": "field required"
+    }
+  ]
+}

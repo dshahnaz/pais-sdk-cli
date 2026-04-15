@@ -1,0 +1,24 @@
+{
+  "id": "chatcmpl-abc",
+  "object": "chat.completion",
+  "created": 1712346000,
+  "model": "openai/gpt-oss-120b-4x",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Based on the knowledge base, the WorkflowManager class coordinates task execution."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 120,
+    "completion_tokens": 24,
+    "total_tokens": 144
+  },
+  "references": [
+    {"document_id": "doc_123", "chunk_id": "c1", "score": 0.82}
+  ]
+}

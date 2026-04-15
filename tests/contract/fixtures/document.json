@@ -1,0 +1,10 @@
+{
+  "id": "doc_123",
+  "object": "document",
+  "created_at": 1712345720,
+  "index_id": "idx_xyz789",
+  "origin_name": "test_file.py",
+  "state": "INDEXED",
+  "size_bytes": 2048,
+  "chunk_count": 5
+}

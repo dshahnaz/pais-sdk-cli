@@ -1,0 +1,23 @@
+{
+  "id": "agent_qqq",
+  "object": "agent",
+  "created_at": 1712345800,
+  "name": "test-agent",
+  "description": "Agent for answering questions about Python code",
+  "model": "openai/gpt-oss-120b-4x",
+  "instructions": "You are a Python code analysis assistant.",
+  "completion_role": "assistant",
+  "session_max_length": 10000,
+  "session_summarization_strategy": "delete_oldest",
+  "index_reference_format": "structured",
+  "chat_system_instruction_mode": "system-message",
+  "tools": [
+    {
+      "link_type": "PAIS_KNOWLEDGE_BASE_INDEX_SEARCH_TOOL_LINK",
+      "tool_id": "mcp_tool_kbsearch_1",
+      "top_n": 5,
+      "similarity_cutoff": 0.0
+    }
+  ],
+  "status": "READY"
+}

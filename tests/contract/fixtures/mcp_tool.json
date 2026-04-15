@@ -1,0 +1,7 @@
+{
+  "id": "mcp_tool_kbsearch_1",
+  "object": "mcp_tool",
+  "name": "knowledge_base_index_search",
+  "description": "Search the knowledge base index for relevant chunks.",
+  "server": "built-in"
+}
