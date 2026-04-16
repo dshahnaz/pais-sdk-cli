@@ -240,14 +240,24 @@ UUIDs work everywhere aliases do — `pais ingest <kb_uuid>:<idx_uuid> ./files/`
 
 ### Built-in splitters
 
-| kind | best for | options |
-|---|---|---|
-| `test_suite_md` | structured test-suite markdown (H1/H2/H3 → atomic sections + breadcrumb) | `budget_tokens` |
-| `markdown_headings` | any markdown; split at H2 or H3 | `heading_level`, `breadcrumb` |
-| `passthrough` | PDFs, plain text, anything where PAIS should do its own splitting | — |
-| `text_chunks` | plain text / logs (sliding-window chunker) | `chunk_chars`, `overlap_chars` |
+| kind | summary | input | typical chunk |
+|---|---|---|---|
+| `test_suite_md` | Atomic per-section split for H1/H2/H3 test-suite markdown | structured markdown (H1=suite, H2=section, H3=subsection) | ≈ 400 tokens (~1.5 KB English) |
+| `markdown_headings` | Generic markdown split at a configurable heading level | any markdown with headings | variable — one chunk per H2 (or H3) |
+| `passthrough` | Upload each file as-is; PAIS handles all splitting | any file (binary OK) | = file size (1 chunk per file) |
+| `text_chunks` | Sliding character window with configurable overlap | any UTF-8 text (logs, plain text) | 1500 chars (≈ 375 tokens English) with 100-char overlap |
 
-`pais splitters list` and `pais splitters show <kind>` print options + JSON schema for each.
+Discover and inspect them from the CLI:
+```bash
+pais splitters list                        # compact (kind + summary)
+pais splitters list -v                     # adds input + chunk size + unit
+pais splitters show test_suite_md          # rich panel: input/algorithm/output/options/notes
+pais splitters preview test_suite_md ~/Downloads/Access-Management.md
+                                           # dry-run: chunk count + size distribution
+                                           # in BOTH tokens and chars + sample chunk
+```
+
+The `preview` command is the fastest way to answer "how would this splitter chop my file?" before spending an upload.
 
 **Content hygiene**: bodies are uploaded as-is. Scrub internal hostnames / IPs / credentials from input files before ingesting into a shared PAIS deployment — the structured logger redacts secret-looking *keys* but cannot sanitize arbitrary prose.
 

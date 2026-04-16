@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -154,28 +155,159 @@ def _print_summary(report: IngestReport, report_path: Path, *, output: str) -> N
 
 
 @splitters_app.command("list")
-def splitters_list(output: str = OUTPUT_OPT) -> None:
-    """List every registered splitter kind."""
-    rows = [{"kind": k, "class": cls.__name__} for k, cls in sorted(SPLITTER_REGISTRY.items())]
-    render(rows, fmt=output, columns=["kind", "class"])
+def splitters_list(
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Include summary, input type, and typical chunk size."
+    ),
+    output: str = OUTPUT_OPT,
+) -> None:
+    """List every registered splitter kind. `-v` adds metadata columns."""
+    from pais.ingest.splitters._base import meta_for
+
+    rows: list[dict[str, object]] = []
+    for k, cls in sorted(SPLITTER_REGISTRY.items()):
+        m = meta_for(cls)
+        row: dict[str, object] = {"kind": k, "summary": m.summary}
+        if verbose:
+            row["input"] = m.input_type
+            row["chunk_size"] = m.typical_chunk_size
+            row["unit"] = m.chunk_size_unit
+        rows.append(row)
+    cols = ["kind", "summary"]
+    if verbose:
+        cols += ["input", "chunk_size", "unit"]
+    render(rows, fmt=output, columns=cols)
 
 
 @splitters_app.command("show")
 def splitters_show(kind: str, output: str = OUTPUT_OPT) -> None:
-    """Show the option schema for one splitter kind."""
+    """Show full metadata + option schema for one splitter kind."""
+    from pais.ingest.splitters._base import meta_for
 
     def go() -> None:
         cls = get_splitter(kind)
+        m = meta_for(cls)
         schema = cls.options_model.model_json_schema()
-        render(
-            {
-                "kind": cls.kind,
-                "class": cls.__name__,
-                "options_model": cls.options_model.__name__,
-                "schema": schema,
-            },
-            fmt=output,
+        if output == "table":
+            _render_show_panel(cls, m, schema)
+        else:
+            render(
+                {
+                    "kind": cls.kind,
+                    "class": cls.__name__,
+                    "options_model": cls.options_model.__name__,
+                    "meta": m.to_dict(),
+                    "schema": schema,
+                },
+                fmt=output,
+            )
+
+    _run(go)
+
+
+def _render_show_panel(cls: Any, meta: Any, schema: dict[str, Any]) -> None:
+    """Rich-render a splitter's metadata + options table."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+
+    console = Console()
+
+    # Header
+    console.print(
+        Panel.fit(
+            f"[bold cyan]{cls.kind}[/bold cyan]\n[dim]{meta.summary}[/dim]",
+            border_style="cyan",
         )
+    )
+
+    # Input
+    console.print("\n[bold]Input[/bold]")
+    console.print(f"  {meta.input_type}")
+    console.print(f"  [dim]example: {meta.example_input}[/dim]")
+
+    # Algorithm
+    console.print("\n[bold]Algorithm[/bold]")
+    for line in _wrap(meta.algorithm, width=78, indent="  "):
+        console.print(line)
+
+    # Output
+    console.print("\n[bold]Output[/bold]")
+    out_table = Table(show_header=False, box=None, pad_edge=False)
+    out_table.add_column(style="bold cyan", no_wrap=True)
+    out_table.add_column()
+    out_table.add_row("unit", meta.chunk_size_unit)
+    out_table.add_row("typical size", meta.typical_chunk_size)
+    if meta.token_char_hint:
+        out_table.add_row("token<->char", meta.token_char_hint)
+    console.print(out_table)
+
+    # Options
+    props: dict[str, Any] = schema.get("properties") or {}
+    if props:
+        console.print("\n[bold]Options[/bold]")
+        opt_table = Table()
+        for col in ("field", "type", "default", "constraint", "description"):
+            opt_table.add_column(col)
+        for name, info in props.items():
+            opt_table.add_row(
+                name,
+                str(info.get("type") or info.get("anyOf") or "?"),
+                str(info.get("default", "—")),
+                _constraint_summary(info),
+                str(info.get("description") or ""),
+            )
+        console.print(opt_table)
+
+    # Notes
+    if meta.notes:
+        console.print("\n[bold]Notes[/bold]")
+        for n in meta.notes:
+            console.print(f"  • {n}")
+
+
+def _wrap(text: str, *, width: int, indent: str) -> list[str]:
+    import textwrap
+
+    return [indent + line for line in textwrap.wrap(text, width=width - len(indent)) or [""]]
+
+
+def _constraint_summary(prop: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if "minimum" in prop or "exclusiveMinimum" in prop:
+        lo = prop.get("minimum", prop.get("exclusiveMinimum"))
+        op = ">=" if "minimum" in prop else ">"
+        parts.append(f"{op} {lo}")
+    if "maximum" in prop or "exclusiveMaximum" in prop:
+        hi = prop.get("maximum", prop.get("exclusiveMaximum"))
+        op = "<=" if "maximum" in prop else "<"
+        parts.append(f"{op} {hi}")
+    return ", ".join(parts) or "—"
+
+
+@splitters_app.command("preview")
+def splitters_preview(
+    kind: str = typer.Argument(..., help="Splitter kind to preview."),
+    path: Path = typer.Argument(..., help="File or directory to split (dry-run; no upload)."),
+    limit: int = typer.Option(100, "--limit", help="Max files when path is a directory."),
+    max_bytes: int = typer.Option(
+        50 * 1024 * 1024,
+        "--max-bytes",
+        help="Cap total bytes scanned (when path is a directory).",
+    ),
+    output: str = OUTPUT_OPT,
+) -> None:
+    """Run a splitter against a real file/dir (dry-run) and report the chunk distribution."""
+    from rich.console import Console
+
+    from pais.cli._splitter_preview import preview, render_panel
+
+    def go() -> None:
+        report = preview(kind, path, limit=limit, max_bytes=max_bytes)
+        if output == "table":
+            render_panel(report, Console())
+        else:
+            render(report.to_dict(), fmt=output)
 
     _run(go)
 

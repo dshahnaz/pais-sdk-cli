@@ -20,17 +20,72 @@ class SplitDoc:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class SplitterMeta:
+    """Human-readable metadata every splitter declares.
+
+    Surfaced by `pais splitters list`/`show`, the interactive picker, and
+    workflow B's pre-ingest brief — so users pick the right splitter without
+    reading source.
+    """
+
+    summary: str  # one-line tagline (≤ 70 chars)
+    input_type: str  # e.g. "structured markdown (H1/H2/H3)" / "any UTF-8 text"
+    algorithm: str  # 1-3 sentences, plain English
+    chunk_size_unit: str  # "tokens" | "chars" | "file"
+    typical_chunk_size: str  # e.g. "≈ 400 tokens (~1.5 KB English)"
+    token_char_hint: str | None  # e.g. "≈ 4 chars/token (English, BAAI/bge-small-en-v1.5)"
+    example_input: str  # one-line example
+    notes: tuple[str, ...] = ()  # caveats, limits
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "summary": self.summary,
+            "input_type": self.input_type,
+            "algorithm": self.algorithm,
+            "chunk_size_unit": self.chunk_size_unit,
+            "typical_chunk_size": self.typical_chunk_size,
+            "token_char_hint": self.token_char_hint,
+            "example_input": self.example_input,
+            "notes": list(self.notes),
+        }
+
+
+_DEFAULT_META = SplitterMeta(
+    summary="(no summary — splitter is missing `meta`)",
+    input_type="(unknown)",
+    algorithm="(no description provided)",
+    chunk_size_unit="(unknown)",
+    typical_chunk_size="(unknown)",
+    token_char_hint=None,
+    example_input="(none)",
+)
+
+
+def meta_for(cls: type) -> SplitterMeta:
+    """Return the splitter class's `meta`, or a placeholder if it predates v0.6.1.
+
+    The Protocol marks `meta` as required, but we don't enforce it at register
+    time — third-party splitters built against the v0.6 contract would crash
+    otherwise. The placeholder lets the CLI render gracefully while signalling
+    that the splitter author should add metadata.
+    """
+    return getattr(cls, "meta", _DEFAULT_META)
+
+
 @runtime_checkable
 class Splitter(Protocol):
     """Per-index splitter contract.
 
-    Implementations declare a `kind` (registry key) and an `options_model`
-    (pydantic schema for the TOML `[splitter]` block). Construction takes the
-    parsed options instance.
+    Implementations declare a `kind` (registry key), an `options_model`
+    (pydantic schema for the TOML `[splitter]` block), and a `meta`
+    (`SplitterMeta` — human-readable docs surfaced by the CLI).
+    Construction takes the parsed options instance.
     """
 
     kind: ClassVar[str]
     options_model: ClassVar[type[BaseModel]]
+    meta: ClassVar[SplitterMeta]
 
     def __init__(self, options: BaseModel) -> None: ...
 

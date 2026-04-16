@@ -9,7 +9,7 @@ from typing import ClassVar
 from pydantic import Field, model_validator
 
 from pais.ingest.registry import register_splitter
-from pais.ingest.splitters._base import SplitDoc, SplitterOptionsBase
+from pais.ingest.splitters._base import SplitDoc, SplitterMeta, SplitterOptionsBase
 
 
 class TextChunksOptions(SplitterOptionsBase):
@@ -31,6 +31,27 @@ class TextChunksSplitter:
 
     kind: ClassVar[str] = "text_chunks"
     options_model: ClassVar[type[TextChunksOptions]] = TextChunksOptions
+    meta: ClassVar[SplitterMeta] = SplitterMeta(
+        summary="Sliding character window with configurable overlap",
+        input_type="any UTF-8 text (logs, plain text, scraped pages)",
+        algorithm=(
+            "Slides a fixed-size character window over the file. Each chunk is "
+            "`chunk_chars` characters; consecutive chunks overlap by `overlap_chars` "
+            "so context isn't cut in the middle of a sentence."
+        ),
+        chunk_size_unit="chars",
+        typical_chunk_size="1500 chars per chunk (≈ 375 tokens English) with 100-char overlap",
+        token_char_hint=(
+            "≈ 4 chars/token (English); this splitter measures in chars, "
+            "not tokens. Set chunk_chars to about 4x your index.chunk_size."
+        ),
+        example_input="a server log, a scraped HTML body, a long .txt file",
+        notes=(
+            "Doesn't respect markdown / paragraph boundaries — use "
+            "`markdown_headings` or `test_suite_md` for structured docs.",
+            "`group_key` is the filename stem — used by --replace.",
+        ),
+    )
 
     def __init__(self, options: TextChunksOptions) -> None:
         self._opts = options

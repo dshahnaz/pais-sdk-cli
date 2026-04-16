@@ -11,7 +11,7 @@ from pydantic import Field
 from pais.dev.markdown import parse, render_body
 from pais.dev.split_suite import _slugify
 from pais.ingest.registry import register_splitter
-from pais.ingest.splitters._base import SplitDoc, SplitterOptionsBase
+from pais.ingest.splitters._base import SplitDoc, SplitterMeta, SplitterOptionsBase
 
 
 class MarkdownHeadingsOptions(SplitterOptionsBase):
@@ -28,6 +28,24 @@ class MarkdownHeadingsSplitter:
 
     kind: ClassVar[str] = "markdown_headings"
     options_model: ClassVar[type[MarkdownHeadingsOptions]] = MarkdownHeadingsOptions
+    meta: ClassVar[SplitterMeta] = SplitterMeta(
+        summary="Generic markdown split at a configurable heading level",
+        input_type="any markdown file with H1/H2/H3 headings",
+        algorithm=(
+            "Splits at H2 (or H3, configurable). Each chunk is the body of one section. "
+            "When `breadcrumb=True` (default), a `# Doc: <H1>\\n## Section: <heading>` "
+            "header is prepended so retrieved chunks carry their context."
+        ),
+        chunk_size_unit="chars",
+        typical_chunk_size="variable - one chunk per H2 (or H3); often 200-3000 chars",
+        token_char_hint="≈ 4 chars/token (English)",
+        example_input="any README, runbook, or docs page",
+        notes=(
+            "No size cap — a single huge section yields a single huge chunk. "
+            "If you need a hard limit, switch to `text_chunks` or `test_suite_md`.",
+            "`group_key` is the H1 slug or filename stem — used by --replace.",
+        ),
+    )
 
     def __init__(self, options: MarkdownHeadingsOptions) -> None:
         self._opts = options
