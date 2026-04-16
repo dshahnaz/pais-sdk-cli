@@ -4,7 +4,7 @@ This file is auto-loaded when working in `pais-sdk-cli`. Read this before changi
 
 ## What this is
 
-Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled mock server (`pais_mock`) for offline development. Public on GitHub: <https://github.com/dshahnaz/pais-sdk-cli>. Latest tag: `v0.4.0` (see `pyproject.toml`/`__version__` for current).
+Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled mock server (`pais_mock`) for offline development. Public on GitHub: <https://github.com/dshahnaz/pais-sdk-cli>. Latest tag: `v0.5.0` (see `pyproject.toml`/`__version__` for current).
 
 ## Layout (one-pager)
 
@@ -28,6 +28,8 @@ Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled
 
 ## Verified PAIS API constraints (don't re-discover)
 
+> **🔗 Authoritative API doc**: <https://developer.broadcom.com/xapis/vmware-private-ai-service-api/latest/> — **WebFetch this at the start of every plan-mode session that touches PAIS endpoints.** Reconcile every shape against the live spec before design. The user has reinforced this rule twice (v0.4 chunk_size units, v0.6 agent index_id shape) — don't be the third reminder.
+
 These shape the design — never assume otherwise without re-checking the docs:
 
 1. `chunk_size` and `chunk_overlap` are **tokens**, not characters.
@@ -35,6 +37,9 @@ These shape the design — never assume otherwise without re-checking the docs:
 3. **No metadata / tag fields on documents.** The only durable label is `origin_name` (the uploaded filename).
 4. **No metadata-filtered search.** Filtering happens client-side or in the agent prompt.
 5. The user's prod PAIS is internal-network, no-auth (`PAIS_AUTH=none`), self-signed TLS (`PAIS_VERIFY_SSL=false`).
+6. **Agent → KB binding** is `index_id` (str, an index UUID) + `index_top_n` (int) directly on `POST /compatibility/openai/v1/agents`. The legacy `tools=[ToolLink(tool_id=mcp_uuid)]` shape in our SDK still works on some deployments and is preserved for back-compat — but **prefer `index_id` for new code**.
+7. **`data_origin_type`** accepts `"DATA_SOURCES"` (plural, per the doc). Our SDK enum also accepts `"LOCAL_FILES"` and `"DATA_SOURCE"` (singular) which work in practice — keep all three.
+8. **MCP tools endpoint** (`/mcp/tools`) is not in the published spec. Treat as undocumented / legacy; new agent creation should not depend on it.
 
 ## Tooling
 
@@ -100,12 +105,13 @@ Or set `PAIS_MODE=mock` (no HTTP, in-process `FakeTransport`). Settings preceden
 
 ## How to plan / propose changes
 
+- **Step 0 (load-bearing)**: For any plan touching PAIS API endpoints — KBs, indexes, agents, chat, search, MCP, embeddings, models, data sources — the very first action is `WebFetch` of <https://developer.broadcom.com/xapis/vmware-private-ai-service-api/latest/>. Cross-check `AgentCreate`, `KnowledgeBaseCreate`, `IndexCreate`, search, and chat shapes against the live spec. Only then start the 5-phase plan workflow. The two times this was skipped (v0.4 chunk_size units, v0.6 agent `index_id`) cost a release cycle each.
 - For any non-trivial change: enter Plan Mode, write the plan to `~/.claude/plans/<plan>.md`, include a **Safety review** section (risks → mitigations) and a **flat one-line-per-task TODO** at the end.
-- Verify against PAIS docs before designing anything API-shaped (the user has called this out explicitly — don't skip).
 - Plans are also copied into `docs/<feature>-plan.md` for the repo when the user asks.
 
 ## What NOT to do
 
+- **Don't start a plan that touches PAIS endpoints without a fresh WebFetch of the doc URL** — past misses (chunk_size units, agent `index_id` shape) each cost a release cycle. The SDK can drift from the spec; the doc is authoritative.
 - Don't bump only `pyproject.toml` and forget `__init__.py` (or vice versa) — `pip install --upgrade` will silently no-op.
 - Don't put secrets in `pais.toml` — the loader rejects `password`, `client_secret`, `bearer_token` at parse time.
 - Don't false-positive `--replace` matches: each splitter owns its `group_key`. Runner does `origin_name.startswith(group_key)`. Convention: most splitters end `group_key` with `__`; `passthrough` uses the full filename for exact match.
