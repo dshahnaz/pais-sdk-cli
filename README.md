@@ -46,6 +46,27 @@ export PAIS_AUTH=none
 pais kb list
 ```
 
+## Interactive mode
+
+Run `pais` (no args) in a terminal and it drops into a menu:
+
+```text
+$ pais
+PAIS interactive shell · profile=lab · mode=http
+Pick a command (type to filter, ↵ to select). ⏏ quit to exit.
+
+> status                    Full env overview: profile, server, KBs, indexes, drift
+  kb show                   KB header + per-index breakdown
+  kb ensure                 Materialize the declarative knowledge_bases / indexes …
+  index delete              Delete an index entirely (cascades documents).
+  ingest                    Run a splitter over PATH and upload the chunks …
+  ...
+```
+
+Pick `index delete` and the menu fetches the live KB list, lets you select one, then fetches indexes under that KB and lets you select which to remove — no UUID typing. Destructive ops always confirm with the resolved name + UUID before executing.
+
+`pais shell` opens the menu explicitly. To opt out of the bare-`pais` trigger, pass `--no-interactive` or set `PAIS_NONINTERACTIVE=1`. Non-TTY callers (pipes, scripts, CI) always print the help banner, never the menu.
+
 ## Persistent config
 
 Tired of `export PAIS_*` on every shell? Drop a TOML config file with named profiles:

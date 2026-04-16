@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable
 from dataclasses import asdict
@@ -21,6 +22,7 @@ from pais.cli._flags import (
 from pais.cli._output import exit_code_for, render
 from pais.cli.ensure_cmd import kb_ensure
 from pais.cli.ingest_cmd import alias_app, ingest_app, splitters_app
+from pais.cli.shell_cmd import shell as shell_cmd
 from pais.cli.status_cmd import status as status_cmd
 from pais.client import PaisClient
 from pais.config import Settings, set_runtime_overrides
@@ -59,6 +61,7 @@ app.add_typer(ingest_app, name="ingest")
 app.add_typer(splitters_app, name="splitters")
 app.add_typer(alias_app, name="alias")
 app.command("status")(status_cmd)
+app.command("shell", help="Open the interactive PAIS menu (force).")(shell_cmd)
 
 
 def _print_version_and_exit(value: bool) -> None:
@@ -69,8 +72,9 @@ def _print_version_and_exit(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def _root(
+    ctx: typer.Context,
     config: Path | None = typer.Option(
         None, "--config", help="Path to a TOML config file (overrides discovery)"
     ),
@@ -85,8 +89,18 @@ def _root(
         callback=_print_version_and_exit,
         help="Show version and exit",
     ),
+    no_interactive: bool = typer.Option(
+        False,
+        "--no-interactive",
+        help="Disable bare-`pais` dropping into the interactive menu.",
+    ),
 ) -> None:
-    """Pin --config / --profile so every subcommand's Settings() picks them up."""
+    """Pin --config / --profile so every subcommand's Settings() picks them up.
+
+    When invoked with no subcommand AND stdin is a TTY AND `--no-interactive`
+    isn't set AND `PAIS_NONINTERACTIVE` env isn't set, drop into the
+    interactive menu. Non-TTY callers (scripts, pipes) get the help banner.
+    """
     set_runtime_overrides(config_path=config, profile=profile)
     # Eager validation: surface config-file errors here with a clean message
     # rather than letting them bubble up as a Python traceback later.
@@ -97,6 +111,18 @@ def _root(
     except ConfigError as e:
         typer.echo(f"config error: {e}", err=True)
         raise typer.Exit(code=1) from e
+
+    if ctx.invoked_subcommand is not None:
+        return
+    if no_interactive or os.environ.get("PAIS_NONINTERACTIVE"):
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    if not sys.stdin.isatty():
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    from pais.cli.interactive import enter_interactive
+
+    enter_interactive(app)
 
 
 def _client() -> PaisClient:

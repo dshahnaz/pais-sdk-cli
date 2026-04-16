@@ -1,0 +1,185 @@
+"""Interactive shell for `pais` — a context-aware menu over the typer command tree.
+
+`enter_interactive(app)` boots the menu when `pais` is invoked with no args
+(and stdin is a TTY). The menu walks the live typer tree via `_introspect`,
+shows one-line descriptions, lets the user drill in or filter by typing,
+prompts for required args (with `_pickers` providing live KB/index/agent
+selection lists), then dispatches the underlying command callback in-process
+and returns to the menu.
+
+Design notes:
+- Group titles are flat: `kb`, `kb list`, `kb show`, … No nested submenus —
+  one big filterable list. Faster to navigate, fewer keystrokes.
+- Destructive ops (`*_delete`, `*_purge`, `index cancel`, `kb ensure --prune`)
+  get a single confirm prompt up-front showing the resolved label, then we
+  auto-pass `yes=True` so the underlying command doesn't double-prompt.
+- Errors land in the same `_run` wrapper as the non-interactive path —
+  `PaisError` exits with the same code; other exceptions are caught and
+  printed without crashing the menu loop.
+"""
+
+from __future__ import annotations
+
+import sys
+from typing import Any
+
+import questionary
+import typer
+from rich.console import Console
+
+from pais.cli._introspect import CommandSpec, ParamSpec, walk
+from pais.cli._pickers import PickerContext, picker_for
+from pais.cli._prompts import CANCEL, prompt_for_param
+from pais.config import Settings
+from pais.errors import PaisError
+
+# Commands that require a confirm prompt before dispatch + auto-pass yes=True.
+_DESTRUCTIVE: frozenset[tuple[str, ...]] = frozenset(
+    {
+        ("kb", "delete"),
+        ("kb", "purge"),
+        ("index", "delete"),
+        ("index", "purge"),
+        ("index", "cancel"),
+        ("agent", "delete"),
+    }
+)
+
+_QUIT = "⏏  quit"
+
+
+def enter_interactive(app: typer.Typer) -> None:
+    """Run the menu loop until the user picks Quit (or hits Ctrl-C)."""
+    console = Console()
+    settings = Settings()
+    console.print(
+        f"[bold]PAIS interactive shell[/bold] · "
+        f"profile=[cyan]{settings.profile or 'default'}[/cyan] · "
+        f"mode=[cyan]{settings.mode}[/cyan]"
+    )
+    console.print("[dim]Pick a command (type to filter, ↵ to select). ⏏ quit to exit.[/dim]\n")
+
+    while True:
+        specs = walk(app)
+        choice = _select_command(specs)
+        if choice is None:
+            console.print("[dim]bye[/dim]")
+            return
+        try:
+            _dispatch(choice, settings, console)
+        except KeyboardInterrupt:
+            console.print("\n[dim]aborted; back to menu[/dim]\n")
+        except PaisError as e:
+            console.print(f"[red]error:[/red] {e}\n")
+        except Exception as e:  # pragma: no cover — surface unexpected
+            console.print(f"[red]error:[/red] {type(e).__name__}: {e}\n")
+
+
+# ----- menu selection ---------------------------------------------------------
+
+
+def _select_command(specs: list[CommandSpec]) -> CommandSpec | None:
+    """Show one big filterable list of every leaf command. Return the chosen
+    spec, or None if the user picked Quit."""
+    titles: list[str] = [_QUIT]
+    by_title: dict[str, CommandSpec] = {}
+    for s in specs:
+        title = f"{s.display:24s}  {s.help or '—'}"
+        titles.append(title)
+        by_title[title] = s
+    pick = questionary.select(
+        "command:", choices=titles, use_search_filter=True, use_jk_keys=False
+    ).ask()
+    if pick is None or pick == _QUIT:
+        return None
+    return by_title[pick]
+
+
+# ----- dispatch ---------------------------------------------------------------
+
+
+def _dispatch(spec: CommandSpec, settings: Settings, console: Console) -> None:
+    """Prompt for every parameter, confirm if destructive, then call the callback."""
+    answers: dict[str, Any] = {}
+
+    # Build a fresh client per dispatch so transport state is clean.
+    with settings.build_client() as client:
+        ctx = PickerContext(client=client, answers=answers, profile=settings.profile or "default")
+
+        is_destructive = spec.path in _DESTRUCTIVE
+        for param in spec.params:
+            # The destructive confirm below auto-injects `yes=True`; don't
+            # prompt the user about it separately.
+            if is_destructive and param.name == "yes":
+                continue
+            value = _resolve_param(spec, param, ctx)
+            if value is CANCEL:
+                console.print("[dim]aborted; back to menu[/dim]\n")
+                return
+            answers[param.name] = value
+
+        if is_destructive:
+            label = _confirmation_label(spec, answers)
+            if not questionary.confirm(
+                f"Really {' '.join(spec.path)} {label}?", default=False
+            ).ask():
+                console.print("[dim]aborted; back to menu[/dim]\n")
+                return
+            if "yes" in {p.name for p in spec.params}:
+                answers["yes"] = True
+
+    # Call the callback outside the client `with` so the command can build its
+    # own client (the dispatched commands all do `with _client() as c: ...`).
+    console.print(f"\n[bold]→ {spec.display}[/bold]\n")
+    try:
+        spec.callback(**answers)
+    except typer.Exit as e:
+        if e.exit_code:
+            console.print(f"[yellow](command exited with code {e.exit_code})[/yellow]")
+    console.print()
+
+
+def _resolve_param(spec: CommandSpec, param: ParamSpec, ctx: PickerContext) -> Any:
+    """Use a context-aware picker if one is registered; else fall back to a
+    type-aware prompt. Optional params can be skipped with the default."""
+    picker = picker_for(spec.path, param.name)
+    if picker is not None:
+        return picker(ctx)
+
+    # Skip optional params unless the user opts in (less prompt fatigue).
+    if (
+        not param.required
+        and not questionary.confirm(
+            f"customize --{param.name.replace('_', '-')} (default: {param.default!r})?",
+            default=False,
+        ).ask()
+    ):
+        return param.default
+
+    return prompt_for_param(param)
+
+
+def _confirmation_label(spec: CommandSpec, answers: dict[str, Any]) -> str:
+    """Render the resolved arguments for the confirm prompt so the user sees
+    exactly what they're about to mutate."""
+    keys = [p.name for p in spec.params if p.kind == "argument"]
+    parts = [f"{k}={answers.get(k)!r}" for k in keys if k in answers and k != "yes"]
+    return " ".join(parts) or "(no args)"
+
+
+# ----- module-level entry shared by app.py + shell_cmd.py ---------------------
+
+
+def run_or_exit(app: typer.Typer, *, force: bool = False) -> None:
+    """Entry point used by both the bare-`pais` trigger and `pais shell`.
+
+    `force=True` skips the TTY check (so `pais shell` works in pseudo-terminals
+    where stdin detection is unreliable; bare `pais` keeps the TTY guard so
+    `pais | head` doesn't hang)."""
+    if not force and not sys.stdin.isatty():
+        return  # caller falls through to the help banner
+    enter_interactive(app)
+
+
+# Re-exported so app.py can wire it without importing the long name.
+__all__ = ["enter_interactive", "run_or_exit"]

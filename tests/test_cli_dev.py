@@ -1,5 +1,6 @@
-"""`pais-dev` is a removal redirect in v0.4. This file just verifies the shim
-exits 1 with a useful message."""
+"""`pais-dev` console script was removed in v0.5.0. The Python module shim
+remains so `python -m pais.cli.dev` from a stale install prints a useful
+redirect instead of crashing."""
 
 from __future__ import annotations
 
