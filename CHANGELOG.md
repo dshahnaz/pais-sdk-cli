@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.2 · `pais status` shows agents + always-on indexes section
+
+Purely additive. No breaking changes.
+
+### Changed
+- **`pais status`** now always renders the **Indexes** section (one extra `indexes.list` per KB — same N+1 cost as `kb show`). Empty server → `(none)` placeholder. The `indexes_count` column on the KB table is also always shown. `-c, --with-counts` now only toggles the per-row `documents` aggregate (which is free once the index list is in hand). Behavior matches the user's intent: see indexes by default, see doc totals on demand.
+
+### Added
+- **`pais status` Agents section.** Always rendered (with a `(none)` placeholder when the server has no agents). Columns: id, name, model, status. JSON output gains an `agents` key. A flaky agents endpoint is isolated per-section so it never sinks the rest of the status output.
+
 ## 0.4.1 · `pais status` + global short flags
 
 Purely additive follow-on to 0.4.0. No breaking changes.

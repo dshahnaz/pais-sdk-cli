@@ -1,12 +1,17 @@
 """`pais status` — one-shot environment overview.
 
-Sections rendered:
+Sections rendered (always shown; empty sections render as "(none)"):
   * Profile + connection (mode, base_url, auth, verify_ssl)
-  * Server reachability (`GET /health` ping, skipped with `--no-ping`)
+  * Server reachability (HEAD ping, skipped with `--no-ping`)
   * Alias cache state (path, count, age)
-  * Knowledge bases (alias → name → indexes/docs counts → updated)
-  * Indexes (alias → name → status → docs → embeddings)
+  * Knowledge bases (alias → name → indexes_count → updated)
+  * Indexes (alias → name → status → embeddings)
+  * Agents (id → name → model → status)
   * Drift vs. TOML (read-only; same diff as `pais kb ensure --dry-run`)
+
+`-c, --with-counts` adds the `documents` column to the KB and Index tables
+(requires aggregating `num_documents` per index, which the index list call
+already returns — no additional round trips beyond the always-paid N+1).
 
 Output formats: `table` (rich), `json`, `yaml`. JSON emits one machine-readable
 payload covering every section so it's safe shell glue.
@@ -56,6 +61,7 @@ def status(
             kbs_section = _kbs_section(c, cfg, with_counts=with_counts, epoch=epoch)
             payload["knowledge_bases"] = kbs_section["kbs"]
             payload["indexes"] = kbs_section["indexes"]
+            payload["agents"] = _agents_section(c)
             payload["drift"] = _drift_section(c, cfg, profile)
 
         if output == "table":
@@ -142,7 +148,7 @@ def _kbs_section(
     with_counts: bool,
     epoch: bool,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Build the KB + index rows together so we can fill in alias columns."""
+    """Build the KB + index rows together (one indexes.list per KB)."""
     server_kbs = client.knowledge_bases.list().data
     name_to_alias = {decl.name: alias for alias, decl in cfg.knowledge_bases.items()}
     kb_rows: list[dict[str, Any]] = []
@@ -150,42 +156,63 @@ def _kbs_section(
 
     for kb in server_kbs:
         kb_alias = name_to_alias.get(kb.name)
+        idx_alias_by_name: dict[str, str] = {}
+        if kb_alias and kb_alias in cfg.knowledge_bases:
+            idx_alias_by_name = {ix.name: ix.alias for ix in cfg.knowledge_bases[kb_alias].indexes}
+
+        indexes = client.indexes.list(kb.id).data
         kb_row: dict[str, Any] = {
             "alias": kb_alias or "—",
             "name": kb.name,
             "id": kb.id,
             "data_origin_type": getattr(kb.data_origin_type, "value", kb.data_origin_type),
+            "indexes_count": len(indexes),
             "updated": _fmt_ts(getattr(kb, "last_updated_at", None), epoch=epoch),
         }
-
-        idx_alias_by_name: dict[str, str] = {}
-        if kb_alias and kb_alias in cfg.knowledge_bases:
-            idx_alias_by_name = {ix.name: ix.alias for ix in cfg.knowledge_bases[kb_alias].indexes}
-
         if with_counts:
-            indexes = client.indexes.list(kb.id).data
-            kb_row["indexes_count"] = len(indexes)
             kb_row["documents"] = sum(getattr(i, "num_documents", 0) or 0 for i in indexes)
-            for ix in indexes:
-                index_rows.append(
-                    {
-                        "alias": (
-                            f"{kb_alias}:{idx_alias_by_name[ix.name]}"
-                            if kb_alias and ix.name in idx_alias_by_name
-                            else "—"
-                        ),
-                        "kb_alias": kb_alias or "—",
-                        "name": ix.name,
-                        "id": ix.id,
-                        "status": getattr(ix.status, "value", ix.status),
-                        "documents": getattr(ix, "num_documents", 0) or 0,
-                        "embeddings_model_endpoint": ix.embeddings_model_endpoint,
-                        "chunk_size": ix.chunk_size,
-                    }
-                )
+        for ix in indexes:
+            row: dict[str, Any] = {
+                "alias": (
+                    f"{kb_alias}:{idx_alias_by_name[ix.name]}"
+                    if kb_alias and ix.name in idx_alias_by_name
+                    else "—"
+                ),
+                "kb_alias": kb_alias or "—",
+                "name": ix.name,
+                "id": ix.id,
+                "status": getattr(ix.status, "value", ix.status),
+                "embeddings_model_endpoint": ix.embeddings_model_endpoint,
+                "chunk_size": ix.chunk_size,
+            }
+            if with_counts:
+                row["documents"] = getattr(ix, "num_documents", 0) or 0
+            index_rows.append(row)
         kb_rows.append(kb_row)
 
     return {"kbs": kb_rows, "indexes": index_rows}
+
+
+def _agents_section(client: PaisClient) -> list[dict[str, Any]]:
+    """List server-side agents. Empty list when no agents exist; error stays
+    isolated to this section so a flaky agents endpoint never sinks status."""
+    try:
+        agents = client.agents.list().data
+    except Exception as e:
+        return [{"error": str(e)}]
+    rows: list[dict[str, Any]] = []
+    for a in agents:
+        rows.append(
+            {
+                "id": a.id,
+                "name": a.name,
+                "model": getattr(a, "model", "—"),
+                "status": (
+                    getattr(a.status, "value", a.status) if getattr(a, "status", None) else "—"
+                ),
+            }
+        )
+    return rows
 
 
 def _drift_section(client: PaisClient, cfg: Any, profile: str) -> list[dict[str, Any]]:
@@ -263,14 +290,13 @@ def _render_table(payload: dict[str, Any], *, with_counts: bool) -> None:
         kb_table = Table()
         for col in ("alias", "name", "id"):
             kb_table.add_column(col)
+        kb_table.add_column("indexes", justify="right")
         if with_counts:
-            kb_table.add_column("indexes", justify="right")
             kb_table.add_column("docs", justify="right")
         kb_table.add_column("updated")
         for row in kbs:
-            cells = [row["alias"], row["name"], row["id"]]
+            cells = [row["alias"], row["name"], row["id"], str(row.get("indexes_count", "—"))]
             if with_counts:
-                cells.append(str(row.get("indexes_count", "—")))
                 cells.append(str(row.get("documents", "—")))
             cells.append(row["updated"])
             kb_table.add_row(*cells)
@@ -278,32 +304,44 @@ def _render_table(payload: dict[str, Any], *, with_counts: bool) -> None:
     else:
         console.print("[dim](none)[/dim]")
 
-    if with_counts:
-        idxs = payload["indexes"]
-        console.print(f"\n[bold]Indexes ({len(idxs)})[/bold]")
-        if idxs:
-            ix_table = Table()
-            for col in (
-                "alias",
-                "name",
-                "status",
-                "documents",
-                "embeddings_model_endpoint",
-                "chunk_size",
-            ):
-                ix_table.add_column(col)
-            for row in idxs:
-                ix_table.add_row(
-                    row["alias"],
-                    row["name"],
-                    str(row["status"]),
-                    str(row["documents"]),
-                    str(row["embeddings_model_endpoint"]),
-                    str(row["chunk_size"]),
-                )
-            console.print(ix_table)
-        else:
-            console.print("[dim](none)[/dim]")
+    idxs = payload["indexes"]
+    console.print(f"\n[bold]Indexes ({len(idxs)})[/bold]")
+    if idxs:
+        ix_table = Table()
+        cols = ["alias", "name", "status"]
+        if with_counts:
+            cols.append("documents")
+        cols.extend(["embeddings_model_endpoint", "chunk_size"])
+        for col in cols:
+            ix_table.add_column(col)
+        for row in idxs:
+            cells = [row["alias"], row["name"], str(row["status"])]
+            if with_counts:
+                cells.append(str(row.get("documents", "—")))
+            cells.extend([str(row["embeddings_model_endpoint"]), str(row["chunk_size"])])
+            ix_table.add_row(*cells)
+        console.print(ix_table)
+    else:
+        console.print("[dim](none)[/dim]")
+
+    agents = payload["agents"]
+    console.print(f"\n[bold]Agents ({len(agents)})[/bold]")
+    if agents and not (len(agents) == 1 and "error" in agents[0]):
+        ag_table = Table()
+        for col in ("id", "name", "model", "status"):
+            ag_table.add_column(col)
+        for row in agents:
+            ag_table.add_row(
+                str(row.get("id", "—")),
+                str(row.get("name", "—")),
+                str(row.get("model", "—")),
+                str(row.get("status", "—")),
+            )
+        console.print(ag_table)
+    elif agents and "error" in agents[0]:
+        console.print(f"[red]error: {agents[0]['error']}[/red]")
+    else:
+        console.print("[dim](none)[/dim]")
 
     drift = payload["drift"]
     console.print("\n[bold]Drift (vs. TOML)[/bold]")
