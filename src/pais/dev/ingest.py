@@ -82,16 +82,30 @@ def ingest_directory(
     index_id: str,
     workers: int = 4,
     progress: Callable[[str], None] | None = None,
+    replace: bool = False,
 ) -> IngestReport:
-    """Walk `root` for .md suite files, split and upload each in parallel."""
+    """Walk `root` for .md suite files, split and upload each in parallel.
+
+    When ``replace=True``, before uploading each suite we delete any existing
+    documents in the index whose ``origin_name`` starts with the suite slug
+    (the part of the filename before the first ``__``). Untouched suites stay.
+    """
     md_files = sorted(Path(root).rglob("*.md"))
     report = IngestReport(total_suites=len(md_files))
     lock = threading.Lock()
     request_id = new_request_id()
-    _log.info("pais.ingest.start", root=str(root), files=len(md_files), request_id=request_id)
+    _log.info(
+        "pais.ingest.start",
+        root=str(root),
+        files=len(md_files),
+        replace=replace,
+        request_id=request_id,
+    )
 
     def worker(p: Path) -> SuiteResult:
         try:
+            if replace:
+                _replace_for_suite(client, p, kb_id=kb_id, index_id=index_id)
             result = ingest_file(client, p, kb_id=kb_id, index_id=index_id)
         except Exception as e:
             result = SuiteResult(
@@ -189,6 +203,38 @@ def _upload_sections(
                 "pais.ingest.upload_failed", suite=suite_name, section=s.section_name, error=str(e)
             )
     return result
+
+
+def _suite_slug_from_path(path: Path) -> str:
+    """Compute the same suite slug the splitter uses, so --replace can match
+    `origin_name` prefixes without re-running the splitter."""
+    from pais.dev.markdown import parse
+    from pais.dev.split_suite import _slugify  # internal but stable
+
+    doc = parse(path.read_text(encoding="utf-8"))
+    return _slugify(doc.title or path.stem)
+
+
+def _replace_for_suite(
+    client: PaisClient,
+    path: Path,
+    *,
+    kb_id: str,
+    index_id: str,
+) -> None:
+    """Delete documents in the index whose origin_name matches this suite."""
+    from pais.resources.indexes import IndexesResource
+
+    slug = _suite_slug_from_path(path)
+    prefix = f"{slug}__"
+    indexes = IndexesResource(client._transport)
+    pr = indexes.purge(kb_id, index_id, strategy="api", match_origin_prefix=prefix)
+    _log.info(
+        "pais.ingest.replace",
+        suite=slug,
+        deleted=pr.documents_deleted,
+        errors=len(pr.errors),
+    )
 
 
 def _upload_one(client: PaisClient, kb_id: str, index_id: str, section: SplitSection) -> Document:

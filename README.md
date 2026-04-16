@@ -46,6 +46,49 @@ export PAIS_AUTH=none
 pais kb list
 ```
 
+## Persistent config
+
+Tired of `export PAIS_*` on every shell? Drop a TOML config file with named profiles:
+
+```bash
+pais config init                  # writes ~/.pais/config.toml with comments
+pais config init --project        # writes ./pais.toml in the current dir
+pais config show --profile lab    # print effective settings (secrets redacted)
+pais config path                  # which file + profile resolve right now
+```
+
+Example file:
+
+```toml
+# ~/.pais/config.toml  (or ./pais.toml — project wins over global)
+default_profile = "lab"
+
+[profiles.lab]
+mode = "http"
+base_url = "https://pais.internal/api/v1"
+auth = "none"
+verify_ssl = false
+
+[profiles.prod]
+mode = "http"
+base_url = "https://pais.example.com/api/v1"
+auth = "oidc_password"
+oidc_issuer = "https://pais.example.com"
+client_id = "pais-cli"
+username = "alice"
+# password / client_secret / bearer_token are REJECTED here — env vars only.
+```
+
+Then every command picks it up:
+
+```bash
+pais --profile lab kb list
+pais --profile prod agent chat agent_xx "hello"
+# or set PAIS_PROFILE=lab once for the whole shell
+```
+
+Precedence (highest first): CLI flag → `PAIS_*` env var → config file → defaults. Discovery order for the file: `--config <path>` → `PAIS_CONFIG` → `./pais.toml` → `~/.pais/config.toml`.
+
 ## Three runbooks
 
 ### 1. Mock mode (no real host)
@@ -110,6 +153,41 @@ pais index wait <kb_id> <ix_id>
 **Content hygiene**: bodies are uploaded as-is. Scrub internal hostnames / IPs / credentials from suite files before ingesting into any shared PAIS deployment — the structured logger redacts secret-looking *keys* but cannot sanitize arbitrary prose.
 
 **Idempotency (current limitation)**: re-running `ingest-suites` against the same directory creates duplicates — PAIS assigns new `document_id`s to the same `origin_name`s. For a clean re-ingest, delete the KB and recreate it. A `--replace` flag is planned.
+
+## Cleanup & cancel
+
+Destructive ops require either a TTY confirmation prompt or `--yes` / `-y`. They refuse to run in scripts (non-TTY) without `--yes`.
+
+```bash
+# delete a whole KB (cascades indexes + documents)
+pais kb delete kb_xxx --yes
+
+# keep the KB, drop every document under every index in it
+pais kb purge kb_xxx --yes
+
+# keep the index, drop its documents
+pais index purge kb_xxx idx_yyy --yes
+
+# delete one index entirely
+pais index delete kb_xxx idx_yyy --yes
+
+# cancel a running indexing job
+pais index cancel kb_xxx idx_yyy --yes
+```
+
+Each cleanup/cancel command takes `--strategy {auto,api,recreate}`:
+
+- **`api`** — try the obvious REST verb (`DELETE /documents/{id}` for purge, `DELETE /active-indexing` for cancel). Fails fast if the PAIS deployment doesn't expose it.
+- **`recreate`** — delete the index entirely and recreate it with the same config. Always works but **the new index gets a different `id`** — you'll need to re-link any agents pointing at the old one. The CLI prints a warning when this happens.
+- **`auto`** (default) — try `api` first, fall back to `recreate` on 404/405.
+
+### Re-ingest cleanly
+
+`pais-dev ingest-suites --replace` deletes only the documents whose `origin_name` belongs to the suites being re-uploaded; everything else stays:
+
+```bash
+pais-dev ingest-suites ./changed-suites/ --kb kb_xxx --index idx_yyy --replace
+```
 
 ## Logging & troubleshooting
 

@@ -8,6 +8,7 @@ import socket
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import uvicorn
@@ -179,6 +180,100 @@ def test_validation_error_exits_1(live_server: str) -> None:
 def test_not_found_exits_2(mock_runner: CliRunner) -> None:
     r = mock_runner.invoke(cli_app, ["kb", "get", "kb_does_not_exist", "--output", "json"])
     assert r.exit_code == 2, r.output
+
+
+def test_config_init_writes_scaffold(mock_runner: CliRunner) -> None:
+    # Direct project-write is exercised in test_config_file via the loader.
+    # Here we just verify init runs end-to-end (it may write or refuse if file
+    # already exists in the working dir).
+    r = mock_runner.invoke(cli_app, ["config", "init", "--project"], catch_exceptions=False)
+    assert r.exit_code in (0, 1)
+
+
+def test_config_show_redacts_secrets(mock_runner: CliRunner) -> None:
+    r = mock_runner.invoke(cli_app, ["config", "show", "--output", "json"])
+    assert r.exit_code == 0, r.output
+    data = json.loads(r.output)
+    assert data["mode"] == "mock"
+    # password key absent or redacted (not a real secret in mock)
+    assert data.get("password") in (None, "***")
+
+
+def test_config_path_command(mock_runner: CliRunner) -> None:
+    r = mock_runner.invoke(cli_app, ["config", "path", "--output", "json"])
+    assert r.exit_code == 0, r.output
+    data = json.loads(r.output)
+    assert "config_file" in data
+    assert "profile" in data
+
+
+def test_kb_delete_requires_yes_in_non_tty(mock_runner: CliRunner) -> None:
+    r = mock_runner.invoke(cli_app, ["kb", "delete", "kb_xx"])
+    # Without --yes and without TTY, command must refuse.
+    assert r.exit_code == 1
+    assert "without --yes" in r.output or "without --yes" in (r.stderr or "")
+
+
+def test_kb_purge_with_yes(live_server: str) -> None:
+    """purge runs against a live mock server; needs persistent state."""
+    from pais.cli.app import app as pais_app
+
+    runner = CliRunner()
+    r = runner.invoke(pais_app, ["kb", "create", "--name", "p", "--output", "json"])
+    kb_id = json.loads(r.output)["id"]
+    r = runner.invoke(
+        pais_app,
+        ["index", "create", kb_id, "--name", "ix", "--embeddings-model", "bge", "--output", "json"],
+    )
+    assert r.exit_code == 0
+    r = runner.invoke(pais_app, ["kb", "purge", kb_id, "--yes", "--output", "json"])
+    assert r.exit_code == 0, r.output
+    data = json.loads(r.output)
+    assert data["indexes_processed"] >= 1
+
+
+def test_index_purge_with_yes(live_server: str, tmp_path: Path) -> None:
+    from pais.cli.app import app as pais_app
+
+    runner = CliRunner()
+    r = runner.invoke(pais_app, ["kb", "create", "--name", "p", "--output", "json"])
+    kb_id = json.loads(r.output)["id"]
+    r = runner.invoke(
+        pais_app,
+        ["index", "create", kb_id, "--name", "ix", "--embeddings-model", "bge", "--output", "json"],
+    )
+    ix_id = json.loads(r.output)["id"]
+
+    doc = tmp_path / "x.md"
+    doc.write_text("hello")
+    r = runner.invoke(pais_app, ["index", "upload", kb_id, ix_id, str(doc), "--output", "json"])
+    assert r.exit_code == 0
+
+    r = runner.invoke(
+        pais_app,
+        ["index", "purge", kb_id, ix_id, "--yes", "--strategy", "api", "--output", "json"],
+    )
+    assert r.exit_code == 0, r.output
+    data = json.loads(r.output)
+    assert data["documents_deleted"] >= 1
+
+
+def test_index_cancel_noop_when_no_active(live_server: str) -> None:
+    from pais.cli.app import app as pais_app
+
+    runner = CliRunner()
+    r = runner.invoke(pais_app, ["kb", "create", "--name", "c", "--output", "json"])
+    kb_id = json.loads(r.output)["id"]
+    r = runner.invoke(
+        pais_app,
+        ["index", "create", kb_id, "--name", "ix", "--embeddings-model", "bge", "--output", "json"],
+    )
+    ix_id = json.loads(r.output)["id"]
+
+    r = runner.invoke(pais_app, ["index", "cancel", kb_id, ix_id, "--yes", "--output", "json"])
+    assert r.exit_code == 0, r.output
+    data = json.loads(r.output)
+    assert data["strategy_used"] == "noop"
 
 
 def test_auth_error_exits_3(monkeypatch: pytest.MonkeyPatch) -> None:

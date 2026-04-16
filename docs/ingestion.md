@@ -117,12 +117,22 @@ The filename becomes `origin_name` in PAIS — the only durable metadata channel
 - 5xx retries are handled by the existing SDK transport (exponential backoff + jitter).
 - Report includes global token-count distribution (`min / p50 / p95 / max`) across all emitted sections.
 
-## Idempotency (current limitation)
+## Re-ingest cleanly with `--replace`
 
-PAIS treats each upload as a new document. Re-ingesting the same directory produces duplicates because PAIS does not dedupe on `origin_name`. For a clean re-ingest:
+PAIS does not dedupe on `origin_name`, so a plain re-ingest produces duplicates. Use the `--replace` flag:
 
-- **Now:** delete the KB and recreate it (`pais kb delete && pais kb create && …`).
-- **Planned:** a `--replace` flag that enumerates existing documents, deletes those whose `origin_name` matches the new batch, then uploads.
+```bash
+pais-dev ingest-suites ./suites/ --kb kb_xxx --index idx_yyy --replace
+```
+
+For each suite file, the ingester:
+1. Computes the suite slug from its H1 title (same algorithm the splitter uses).
+2. Lists existing documents in the index and deletes only those whose `origin_name` starts with `<slug>__`.
+3. Uploads the freshly split sections.
+
+**Untouched suites stay**, so you can re-ingest only the files that changed. See [README cleanup section](../README.md#cleanup--cancel) for related ops (`kb purge`, `index purge`, `index cancel`) that share the same `--strategy {auto,api,recreate}` semantics.
+
+**Caveat**: `--replace` requires PAIS to expose `DELETE /documents/{id}`. If your deployment doesn't, the ingester aborts with a clear error pointing you at `pais index purge --strategy recreate` (which drops + recreates the entire index, changing its id).
 
 ## Troubleshooting
 

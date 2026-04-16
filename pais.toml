@@ -1,0 +1,6 @@
+# PAIS CLI config — ./pais.toml (project-local; overrides ~/.pais/config.toml).
+
+default_profile = "default"
+
+[profiles.default]
+mode = "mock"
