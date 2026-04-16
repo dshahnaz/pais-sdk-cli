@@ -69,7 +69,13 @@ def enter_interactive(app: typer.Typer) -> None:
     settings = Settings()
 
     # Quiet by default; verbose env opts back into the configured level.
+    # Two-step:
+    #   1. Mutate `settings.log_level` so every subsequent `from_settings`
+    #      call inside the loop applies WARNING (not INFO).
+    #   2. Run `configure_logging` once now to take effect immediately —
+    #      before the first client is built (covers the TLS-warning window).
     if not _os.environ.get("PAIS_VERBOSE"):
+        settings.log_level = "WARNING"
         configure_logging(
             level="WARNING",
             log_file=settings.log_file,
