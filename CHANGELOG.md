@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased] — 0.4.0 · unified `pais` CLI, generic ingest, declarative indexes
+
+### ⚠️ Breaking changes
+- **`pais-dev` is removed.** Its commands (`split-suite`, `ingest-suite`, `ingest-suites`) merged into a single generic `pais ingest <kb_ref>:<index_ref> <path>`. The old `pais-dev` console script ships as a redirect shim that exits 1 with a one-line migration hint; it will be removed entirely in v0.5. See [`docs/migration-0.3-to-0.4.md`](docs/migration-0.3-to-0.4.md).
+
+### Added
+- **Generic `pais ingest <kb_ref>:<index_ref> <path>`** picks the splitter from the index's TOML config (or `--splitter <kind>` to override). Supports `--replace`, `--dry-run`, `--workers`, `--report`.
+- **Splitter registry with 4 built-ins**: `test_suite_md` (existing v0.3 behavior), `markdown_headings` (generic), `passthrough` (no transform), `text_chunks` (sliding-window for plain text).
+- **Declarative KB/index/splitter blocks in TOML** under `[profiles.X.knowledge_bases.<alias>]` + `[[indexes]]` + `[indexes.splitter]`. Validated at load time with pydantic; errors point at the exact TOML path.
+- **Alias system** — short names instead of UUIDs. Cache at `~/.pais/aliases.json`, 404-invalidation. Every existing UUID-taking command now also accepts an alias.
+- **`pais kb ensure`** — idempotent; creates KBs/indexes declared in TOML that don't exist on the server. `--dry-run` previews; `--prune --yes` deletes server-side resources not in TOML (per-item confirmation).
+- **`pais kb show <alias|uuid>`** — full detail view with per-index breakdown.
+- **`pais kb list --with-counts`** opt-in flag adds `indexes` and `documents` columns. Default columns now include `description` and `updated`.
+- **Human dates by default** on `kb list` / `kb show` / `index list`. `--epoch` opts out.
+- **`pais splitters list / show <kind>`** — discover splitters and their option schemas.
+- **`pais alias list / clear [<alias>]`** — inspect / invalidate the resolution cache.
+
+### Verified PAIS API constraints (drove the design)
+- API still doesn't expose cancel-indexing, per-document DELETE, or batch DELETE — cleanup ops continue using the v0.3 probe-then-fallback pattern.
+
+### Migration
+| v0.3 | v0.4 |
+|---|---|
+| `pais-dev split-suite f.md --out d/` | `pais ingest K:I f.md --dry-run` (writes to report instead) |
+| `pais-dev ingest-suite f.md --kb K --index I` | `pais ingest K:I f.md` |
+| `pais-dev ingest-suites d/ --kb K --index I` | `pais ingest K:I d/` |
+| `pais-dev ingest-suites d/ --kb K --index I --replace` | `pais ingest K:I d/ --replace` |
+
 ## 0.3.1
 
 ### Fixed

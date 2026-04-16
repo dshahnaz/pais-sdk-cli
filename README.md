@@ -122,57 +122,115 @@ export PAIS_CLIENT_ID=... PAIS_USERNAME=... PAIS_PASSWORD=...
 uv run pais kb list
 ```
 
-## Ingest test suites
+## Declarative config & `pais kb ensure`
 
-Feed ~300 structured markdown test-suite files into a PAIS KB with budget-safe chunking. Each suite file is split per-section, prefixed with a breadcrumb header (suite + section name + kind), and uploaded as one document per section. Every emitted file is validated against a 400-token cap (measured with the same `BAAI/bge-small-en-v1.5` tokenizer PAIS uses) so one file = one chunk — no silent server-side re-splitting. See [`docs/ingestion.md`](docs/ingestion.md) for the full design.
+Declare KBs + indexes + their splitters in TOML, then operate on short aliases instead of UUIDs.
 
-```bash
-# install dev extras (adds the tokenizers dep used by the splitter)
-uv sync --all-extras
+```toml
+# ~/.pais/config.toml  (or ./pais.toml — project wins)
+[profiles.lab]
+mode = "http"
+base_url = "https://10.160.11.45/api/v1"
+auth = "none"
+verify_ssl = false
 
-# 0. create KB + index (chunk_size is in tokens, not chars)
-pais kb create --name test-suites --output json       # → kb_id
-pais index create <kb_id> --name ts-idx \
-    --embeddings-model BAAI/bge-small-en-v1.5 \
-    --chunk-size 512 --chunk-overlap 64 --output json # → ix_id
+[profiles.lab.knowledge_bases.test_suites]
+name = "mops-permanent-test-suites"
+data_origin_type = "LOCAL_FILES"
 
-# 1. dry-run: split one file to disk and inspect
-pais-dev split-suite ./suites/Access-Management.md --out ./out/
+  [[profiles.lab.knowledge_bases.test_suites.indexes]]
+  alias = "main"
+  name = "ts-idx"
+  embeddings_model_endpoint = "BAAI/bge-small-en-v1.5"
+  chunk_size = 512
+  chunk_overlap = 64
 
-# 2. split + upload one suite
-pais-dev ingest-suite ./suites/Access-Management.md --kb <kb_id> --index <ix_id>
+    [profiles.lab.knowledge_bases.test_suites.indexes.splitter]
+    kind = "test_suite_md"   # H1/H2/H3 atomic sections + breadcrumb header
+    budget_tokens = 400
 
-# 3. bulk: walk a directory, parallelize, write a JSON report
-pais-dev ingest-suites ./suites/ --kb <kb_id> --index <ix_id> \
-    --workers 4 --report ./ingest-report.json
+  [[profiles.lab.knowledge_bases.test_suites.indexes]]
+  alias = "raw"
+  name = "ts-raw"
+  embeddings_model_endpoint = "BAAI/bge-small-en-v1.5"
 
-# 4. wait for indexing
-pais index wait <kb_id> <ix_id>
+    [profiles.lab.knowledge_bases.test_suites.indexes.splitter]
+    kind = "passthrough"     # upload files as-is; PAIS handles splitting
 ```
 
-**Content hygiene**: bodies are uploaded as-is. Scrub internal hostnames / IPs / credentials from suite files before ingesting into any shared PAIS deployment — the structured logger redacts secret-looking *keys* but cannot sanitize arbitrary prose.
+Then:
 
-**Idempotency (current limitation)**: re-running `ingest-suites` against the same directory creates duplicates — PAIS assigns new `document_id`s to the same `origin_name`s. For a clean re-ingest, delete the KB and recreate it. A `--replace` flag is planned.
+```bash
+pais --profile lab kb ensure   # create anything missing on the server (idempotent)
+pais kb list --with-counts     # see KBs with index + document totals
+pais kb show test_suites       # full KB detail with per-index breakdown
+```
+
+`pais kb ensure` is idempotent. Re-run after editing the TOML — it adds new KBs/indexes and warns about server-side mismatches PAIS doesn't expose updates for. `--dry-run` previews; `--prune --yes` deletes server-side resources not in the TOML (per-item confirmation).
+
+## Ingest data
+
+Generic `pais ingest` runs the splitter declared on the target index over any file or directory.
+
+```bash
+# 0. ensure the KB + index exist (one-time setup from config)
+pais --profile lab kb ensure
+
+# 1. ingest a directory of suite markdown files (uses test_suite_md splitter from config)
+pais ingest test_suites:main ./suites/
+
+# 2. ingest some PDFs / plain text into the same KB but a different index
+pais ingest test_suites:raw ./pdfs/
+
+# 3. re-ingest only changed suites; other suites in the index stay
+pais ingest test_suites:main ./changed/ --replace
+
+# 4. preview without uploading
+pais ingest test_suites:main ./suites/ --dry-run
+
+# 5. one-off override of the splitter
+pais ingest test_suites:main ./README.md --splitter markdown_headings
+
+# 6. wait for indexing
+pais index wait test_suites:main
+```
+
+UUIDs work everywhere aliases do — `pais ingest <kb_uuid>:<idx_uuid> ./files/` is fine for ad-hoc use.
+
+### Built-in splitters
+
+| kind | best for | options |
+|---|---|---|
+| `test_suite_md` | structured test-suite markdown (H1/H2/H3 → atomic sections + breadcrumb) | `budget_tokens` |
+| `markdown_headings` | any markdown; split at H2 or H3 | `heading_level`, `breadcrumb` |
+| `passthrough` | PDFs, plain text, anything where PAIS should do its own splitting | — |
+| `text_chunks` | plain text / logs (sliding-window chunker) | `chunk_chars`, `overlap_chars` |
+
+`pais splitters list` and `pais splitters show <kind>` print options + JSON schema for each.
+
+**Content hygiene**: bodies are uploaded as-is. Scrub internal hostnames / IPs / credentials from input files before ingesting into a shared PAIS deployment — the structured logger redacts secret-looking *keys* but cannot sanitize arbitrary prose.
 
 ## Cleanup & cancel
 
 Destructive ops require either a TTY confirmation prompt or `--yes` / `-y`. They refuse to run in scripts (non-TTY) without `--yes`.
 
+All commands accept either an alias (from your config) or a UUID.
+
 ```bash
 # delete a whole KB (cascades indexes + documents)
-pais kb delete kb_xxx --yes
+pais kb delete test_suites --yes
 
 # keep the KB, drop every document under every index in it
-pais kb purge kb_xxx --yes
+pais kb purge test_suites --yes
 
 # keep the index, drop its documents
-pais index purge kb_xxx idx_yyy --yes
+pais index purge test_suites main --yes
 
 # delete one index entirely
-pais index delete kb_xxx idx_yyy --yes
+pais index delete test_suites main --yes
 
 # cancel a running indexing job
-pais index cancel kb_xxx idx_yyy --yes
+pais index cancel test_suites main --yes
 ```
 
 Each cleanup/cancel command takes `--strategy {auto,api,recreate}`:
@@ -183,10 +241,10 @@ Each cleanup/cancel command takes `--strategy {auto,api,recreate}`:
 
 ### Re-ingest cleanly
 
-`pais-dev ingest-suites --replace` deletes only the documents whose `origin_name` belongs to the suites being re-uploaded; everything else stays:
+`pais ingest --replace` deletes only the documents whose `origin_name` matches the splitter's `group_key` for each input file; everything else stays:
 
 ```bash
-pais-dev ingest-suites ./changed-suites/ --kb kb_xxx --index idx_yyy --replace
+pais ingest test_suites:main ./changed-suites/ --replace
 ```
 
 ## Logging & troubleshooting

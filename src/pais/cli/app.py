@@ -9,8 +9,11 @@ from pathlib import Path
 
 import typer
 
-from pais.cli import config_cmd
+from pais.cli import _alias, _kb_show, config_cmd
+from pais.cli._config_file import load_profile_config
 from pais.cli._output import exit_code_for, render
+from pais.cli.ensure_cmd import kb_ensure
+from pais.cli.ingest_cmd import alias_app, ingest_app, splitters_app
 from pais.client import PaisClient
 from pais.config import Settings, set_runtime_overrides
 from pais.errors import PaisError
@@ -39,6 +42,9 @@ app.add_typer(mcp_app, name="mcp")
 app.add_typer(models_app, name="models")
 app.add_typer(mock_app, name="mock")
 app.add_typer(config_cmd.app, name="config")
+app.add_typer(ingest_app, name="ingest")
+app.add_typer(splitters_app, name="splitters")
+app.add_typer(alias_app, name="alias")
 
 _OutputOpt = typer.Option("table", "--output", "-o", help="table | json | yaml")
 _YesOpt = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt")
@@ -86,6 +92,34 @@ def _client() -> PaisClient:
     return Settings().build_client()
 
 
+def _resolve_kb(client: PaisClient, kb_ref: str) -> str:
+    """Resolve a KB ref (alias or UUID) to a UUID, using the active profile's config."""
+    cfg, _, profile = load_profile_config()
+    return _alias.resolve_kb(client, profile, kb_ref, cfg=cfg)
+
+
+def _resolve_index(client: PaisClient, kb_ref: str, idx_ref: str) -> tuple[str, str]:
+    cfg, _, profile = load_profile_config()
+    return _alias.resolve_index(client, profile, kb_ref, idx_ref, cfg=cfg)
+
+
+def _fmt_ts(value: object, *, epoch: bool) -> str:
+    """Render an epoch int as either the raw int or a human UTC date."""
+    import datetime as _dt
+
+    if value in (None, "", 0):
+        return "—"
+    if epoch:
+        return str(value)
+    try:
+        ts = int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return str(value)
+    if ts <= 0:
+        return "—"
+    return _dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
 def _confirm(message: str, *, yes: bool) -> None:
     if yes:
         return
@@ -112,15 +146,39 @@ def _run(fn: Callable[[], None]) -> None:
 
 # --- KB -----------------------------------------------------------------------
 @kb_app.command("list")
-def kb_list(output: str = _OutputOpt) -> None:
+def kb_list(
+    with_counts: bool = typer.Option(
+        False,
+        "--with-counts",
+        help="Include indexes_count + documents_count (one extra round-trip per KB).",
+    ),
+    epoch: bool = typer.Option(
+        False, "--epoch", help="Print epoch timestamps instead of human dates."
+    ),
+    output: str = _OutputOpt,
+) -> None:
     def go() -> None:
         with _client() as c:
-            items = c.knowledge_bases.list().data
-            render(
-                items,
-                fmt=output,
-                columns=["id", "name", "data_origin_type", "created_at"],
-            )
+            kbs = c.knowledge_bases.list().data
+            rows: list[dict[str, object]] = []
+            for kb in kbs:
+                row = {
+                    "id": kb.id,
+                    "name": kb.name,
+                    "data_origin_type": getattr(kb.data_origin_type, "value", kb.data_origin_type),
+                    "description": kb.description or "",
+                    "created": _fmt_ts(kb.created_at, epoch=epoch),
+                    "updated": _fmt_ts(getattr(kb, "last_updated_at", None), epoch=epoch),
+                }
+                if with_counts:
+                    indexes = c.indexes.list(kb.id).data
+                    row["indexes"] = len(indexes)
+                    row["documents"] = sum(getattr(i, "num_documents", 0) or 0 for i in indexes)
+                rows.append(row)
+            cols = ["id", "name", "data_origin_type", "created", "updated"]
+            if with_counts:
+                cols += ["indexes", "documents"]
+            render(rows, fmt=output, columns=cols)
 
     _run(go)
 
@@ -139,24 +197,54 @@ def kb_create(
     _run(go)
 
 
+kb_app.command("ensure")(kb_ensure)
+
+
+@kb_app.command("show")
+def kb_show(
+    kb_ref: str = typer.Argument(..., help="KB alias (from your config) or UUID."),
+    epoch: bool = typer.Option(
+        False, "--epoch", help="Print epoch timestamps instead of human dates."
+    ),
+    output: str = typer.Option("table", "--output", "-o", help="table | json | yaml"),
+) -> None:
+    """KB header + per-index breakdown."""
+
+    def go() -> None:
+        cfg, _, profile = load_profile_config()
+        with _client() as c:
+            kb_uuid = _alias.resolve_kb(c, profile, kb_ref, cfg=cfg)
+            kb, indexes = _kb_show.fetch(c, kb_uuid)
+            if output == "table":
+                _kb_show.render_table(kb, indexes, epoch=epoch)
+            else:
+                from pais.cli._output import render
+
+                render(_kb_show.to_dict(kb, indexes, epoch=epoch), fmt=output)
+
+    _run(go)
+
+
 @kb_app.command("get")
-def kb_get(kb_id: str, output: str = _OutputOpt) -> None:
+def kb_get(kb_ref: str, output: str = _OutputOpt) -> None:
     def go() -> None:
         with _client() as c:
-            render(c.knowledge_bases.get(kb_id), fmt=output)
+            kb_uuid = _resolve_kb(c, kb_ref)
+            render(c.knowledge_bases.get(kb_uuid), fmt=output)
 
     _run(go)
 
 
 @kb_app.command("delete")
-def kb_delete(kb_id: str, yes: bool = _YesOpt) -> None:
+def kb_delete(kb_ref: str, yes: bool = _YesOpt) -> None:
     """Delete a KB (cascades indexes + documents)."""
-    _confirm(f"delete KB {kb_id} and all its indexes/documents?", yes=yes)
+    _confirm(f"delete KB {kb_ref} and all its indexes/documents?", yes=yes)
 
     def go() -> None:
         with _client() as c:
-            c.knowledge_bases.delete(kb_id)
-            typer.echo(f"deleted {kb_id}")
+            kb_uuid = _resolve_kb(c, kb_ref)
+            c.knowledge_bases.delete(kb_uuid)
+            typer.echo(f"deleted {kb_ref}")
 
     _run(go)
 
@@ -173,7 +261,8 @@ def kb_purge(
 
     def go() -> None:
         with _client() as c:
-            res = c.knowledge_bases.purge(kb_id, strategy=strategy)  # type: ignore[arg-type]
+            kb_uuid = _resolve_kb(c, kb_id)
+            res = c.knowledge_bases.purge(kb_uuid, strategy=strategy)  # type: ignore[arg-type]
             render(
                 {
                     "indexes_processed": res.indexes_processed,
@@ -189,13 +278,41 @@ def kb_purge(
 
 # --- Index --------------------------------------------------------------------
 @index_app.command("list")
-def index_list(kb_id: str, output: str = _OutputOpt) -> None:
+def index_list(
+    kb_ref: str,
+    epoch: bool = typer.Option(False, "--epoch"),
+    output: str = _OutputOpt,
+) -> None:
     def go() -> None:
         with _client() as c:
+            kb_uuid = _resolve_kb(c, kb_ref)
+            rows = []
+            for ix in c.indexes.list(kb_uuid).data:
+                rows.append(
+                    {
+                        "id": ix.id,
+                        "name": ix.name,
+                        "status": getattr(ix.status, "value", ix.status),
+                        "documents": getattr(ix, "num_documents", "—") or "—",
+                        "embeddings_model_endpoint": ix.embeddings_model_endpoint,
+                        "chunk_size": ix.chunk_size,
+                        "last_indexed_at": _fmt_ts(
+                            getattr(ix, "last_indexed_at", None), epoch=epoch
+                        ),
+                    }
+                )
             render(
-                c.indexes.list(kb_id).data,
+                rows,
                 fmt=output,
-                columns=["id", "name", "status", "embeddings_model_endpoint"],
+                columns=[
+                    "id",
+                    "name",
+                    "status",
+                    "documents",
+                    "embeddings_model_endpoint",
+                    "chunk_size",
+                    "last_indexed_at",
+                ],
             )
 
     _run(go)
@@ -203,7 +320,7 @@ def index_list(kb_id: str, output: str = _OutputOpt) -> None:
 
 @index_app.command("create")
 def index_create(
-    kb_id: str,
+    kb_ref: str,
     name: str = typer.Option(...),
     embeddings_model: str = typer.Option(..., "--embeddings-model"),
     chunk_size: int = 400,
@@ -212,8 +329,9 @@ def index_create(
 ) -> None:
     def go() -> None:
         with _client() as c:
+            kb_uuid = _resolve_kb(c, kb_ref)
             ix = c.indexes.create(
-                kb_id,
+                kb_uuid,
                 IndexCreate(
                     name=name,
                     embeddings_model_endpoint=embeddings_model,
@@ -227,10 +345,11 @@ def index_create(
 
 
 @index_app.command("upload")
-def index_upload(kb_id: str, index_id: str, file: str, output: str = _OutputOpt) -> None:
+def index_upload(kb_ref: str, index_ref: str, file: str, output: str = _OutputOpt) -> None:
     def go() -> None:
         with _client() as c:
-            doc = c.indexes.upload_document(kb_id, index_id, file)
+            kb_uuid, idx_uuid = _resolve_index(c, kb_ref, index_ref)
+            doc = c.indexes.upload_document(kb_uuid, idx_uuid, file)
             render(doc, fmt=output)
 
     _run(go)
@@ -238,8 +357,8 @@ def index_upload(kb_id: str, index_id: str, file: str, output: str = _OutputOpt)
 
 @index_app.command("search")
 def index_search(
-    kb_id: str,
-    index_id: str,
+    kb_ref: str,
+    index_ref: str,
     query: str,
     top_n: int = 5,
     similarity_cutoff: float = 0.0,
@@ -247,9 +366,10 @@ def index_search(
 ) -> None:
     def go() -> None:
         with _client() as c:
+            kb_uuid, idx_uuid = _resolve_index(c, kb_ref, index_ref)
             res = c.indexes.search(
-                kb_id,
-                index_id,
+                kb_uuid,
+                idx_uuid,
                 SearchQuery(query=query, top_n=top_n, similarity_cutoff=similarity_cutoff),
             )
             render(
@@ -262,42 +382,47 @@ def index_search(
 
 
 @index_app.command("wait")
-def index_wait(kb_id: str, index_id: str, timeout: float = 300.0, output: str = _OutputOpt) -> None:
+def index_wait(
+    kb_ref: str, index_ref: str, timeout: float = 300.0, output: str = _OutputOpt
+) -> None:
     def go() -> None:
         with _client() as c:
-            indexing = c.indexes.wait_for_indexing(kb_id, index_id, timeout=timeout, interval=1.0)
+            kb_uuid, idx_uuid = _resolve_index(c, kb_ref, index_ref)
+            indexing = c.indexes.wait_for_indexing(kb_uuid, idx_uuid, timeout=timeout, interval=1.0)
             render(indexing, fmt=output)
 
     _run(go)
 
 
 @index_app.command("delete")
-def index_delete(kb_id: str, index_id: str, yes: bool = _YesOpt) -> None:
+def index_delete(kb_ref: str, index_ref: str, yes: bool = _YesOpt) -> None:
     """Delete an index entirely (cascades documents)."""
-    _confirm(f"delete index {index_id} under KB {kb_id}?", yes=yes)
+    _confirm(f"delete index {index_ref} under KB {kb_ref}?", yes=yes)
 
     def go() -> None:
         with _client() as c:
-            c.indexes.delete(kb_id, index_id)
-            typer.echo(f"deleted {index_id}")
+            kb_uuid, idx_uuid = _resolve_index(c, kb_ref, index_ref)
+            c.indexes.delete(kb_uuid, idx_uuid)
+            typer.echo(f"deleted {index_ref}")
 
     _run(go)
 
 
 @index_app.command("purge")
 def index_purge(
-    kb_id: str,
-    index_id: str,
+    kb_ref: str,
+    index_ref: str,
     yes: bool = _YesOpt,
     strategy: str = typer.Option("auto", "--strategy", help="auto | api | recreate"),
     output: str = _OutputOpt,
 ) -> None:
     """Delete all documents in an index. Index itself stays (or is recreated)."""
-    _confirm(f"purge all documents in index {index_id}?", yes=yes)
+    _confirm(f"purge all documents in index {index_ref}?", yes=yes)
 
     def go() -> None:
         with _client() as c:
-            res = c.indexes.purge(kb_id, index_id, strategy=strategy)  # type: ignore[arg-type]
+            kb_uuid, idx_uuid = _resolve_index(c, kb_ref, index_ref)
+            res = c.indexes.purge(kb_uuid, idx_uuid, strategy=strategy)  # type: ignore[arg-type]
             render(asdict(res), fmt=output)
             if res.new_index_id:
                 typer.echo(
@@ -311,18 +436,19 @@ def index_purge(
 
 @index_app.command("cancel")
 def index_cancel(
-    kb_id: str,
-    index_id: str,
+    kb_ref: str,
+    index_ref: str,
     yes: bool = _YesOpt,
     strategy: str = typer.Option("auto", "--strategy", help="auto | api | recreate"),
     output: str = _OutputOpt,
 ) -> None:
     """Cancel an in-progress indexing job."""
-    _confirm(f"cancel indexing for index {index_id}?", yes=yes)
+    _confirm(f"cancel indexing for index {index_ref}?", yes=yes)
 
     def go() -> None:
         with _client() as c:
-            res = c.indexes.cancel_indexing(kb_id, index_id, strategy=strategy)  # type: ignore[arg-type]
+            kb_uuid, idx_uuid = _resolve_index(c, kb_ref, index_ref)
+            res = c.indexes.cancel_indexing(kb_uuid, idx_uuid, strategy=strategy)  # type: ignore[arg-type]
             render(asdict(res), fmt=output)
             if res.new_index_id:
                 typer.echo(
