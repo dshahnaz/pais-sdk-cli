@@ -2,20 +2,48 @@
 
 Contract-first Python SDK + CLI for **VMware Private AI Service (PAIS)**, with a bundled mock server for offline development. Build and test against PAIS APIs without a live host; switch to a real instance via config.
 
+## Install
+
+Not on PyPI yet — install straight from GitHub. Both the `pais` and `pais-dev` commands are wired as console scripts and land on your `PATH`.
+
+```bash
+# pip — latest main
+pip install "git+https://github.com/dshahnaz/pais-sdk-cli.git"
+
+# pip — pinned to a tag/commit (recommended for reproducibility)
+pip install "git+https://github.com/dshahnaz/pais-sdk-cli.git@v0.1.0"
+
+# pip — include dev extras (adds the HuggingFace tokenizers dep needed by `pais-dev`)
+pip install "git+https://github.com/dshahnaz/pais-sdk-cli.git#egg=pais-sdk-cli[dev]"
+
+# uv — into an isolated tool environment (recommended for CLI users)
+uv tool install "git+https://github.com/dshahnaz/pais-sdk-cli.git"
+uv tool install --with "pais-sdk-cli[dev]" "git+https://github.com/dshahnaz/pais-sdk-cli.git"
+
+# pipx — same idea
+pipx install "git+https://github.com/dshahnaz/pais-sdk-cli.git"
+```
+
+Verify:
+
+```bash
+pais --help
+pais-dev --help
+```
+
+For local development (clone + editable install) see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Quickstart
 
 ```bash
-# install
-uv sync --dev
-
 # run the mock server
-uv run python -m pais_mock &
+python -m pais_mock &
 
 # use the CLI against the mock
 export PAIS_MODE=http
 export PAIS_BASE_URL=http://localhost:8080/api/v1
 export PAIS_AUTH=none
-uv run pais kb list
+pais kb list
 ```
 
 ## Three runbooks
