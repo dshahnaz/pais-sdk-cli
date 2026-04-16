@@ -76,6 +76,14 @@ def mock_runner(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
     return CliRunner()
 
 
+def test_version_flag(mock_runner: CliRunner) -> None:
+    from pais import __version__
+
+    r = mock_runner.invoke(cli_app, ["--version"])
+    assert r.exit_code == 0, r.output
+    assert __version__ in r.output
+
+
 def test_kb_create_and_list_json(mock_runner: CliRunner) -> None:
     r = mock_runner.invoke(cli_app, ["kb", "create", "--name", "demo", "--output", "json"])
     assert r.exit_code == 0, r.output

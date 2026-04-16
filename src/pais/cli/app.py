@@ -44,6 +44,14 @@ _OutputOpt = typer.Option("table", "--output", "-o", help="table | json | yaml")
 _YesOpt = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt")
 
 
+def _print_version_and_exit(value: bool) -> None:
+    if value:
+        from pais import __version__
+
+        typer.echo(f"pais {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
 def _root(
     config: Path | None = typer.Option(
@@ -51,6 +59,14 @@ def _root(
     ),
     profile: str | None = typer.Option(
         None, "--profile", help="Profile name within the config file"
+    ),
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        is_eager=True,
+        callback=_print_version_and_exit,
+        help="Show version and exit",
     ),
 ) -> None:
     """Pin --config / --profile so every subcommand's Settings() picks them up."""

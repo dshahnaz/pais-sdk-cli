@@ -20,6 +20,29 @@ app = typer.Typer(
     help="Developer commands for PAIS: split and ingest structured markdown test suites."
 )
 
+
+def _print_version_and_exit(value: bool) -> None:
+    if value:
+        from pais import __version__
+
+        typer.echo(f"pais-dev {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        is_eager=True,
+        callback=_print_version_and_exit,
+        help="Show version and exit",
+    ),
+) -> None:
+    """pais-dev developer commands."""
+
+
 _OutputOpt = typer.Option("table", "--output", "-o", help="table | json | yaml")
 _OutDirOpt = typer.Option(Path("./out"), "--out", help="Output directory")
 _ReportOpt = typer.Option(

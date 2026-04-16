@@ -87,6 +87,15 @@ def live_server(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
         t.join(timeout=2.0)
 
 
+def test_dev_version_flag() -> None:
+    from pais import __version__
+
+    runner = CliRunner()
+    r = runner.invoke(dev_app, ["--version"])
+    assert r.exit_code == 0, r.output
+    assert __version__ in r.output
+
+
 def test_split_suite_cmd(tmp_path: Path) -> None:
     runner = CliRunner()
     src = tmp_path / "Demo.md"
