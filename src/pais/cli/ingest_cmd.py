@@ -11,6 +11,16 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from pais.cli import _alias
 from pais.cli._config_file import load_profile_config
+from pais.cli._flags import (
+    DRY_RUN_OPT,
+    HELP_OPTION_NAMES,
+    OUTPUT_OPT,
+    PROFILE_OPT,
+    REPLACE_OPT,
+    REPORT_OPT,
+    SPLITTER_OPT,
+    WORKERS_OPT,
+)
 from pais.cli._output import exit_code_for, render
 from pais.client import PaisClient
 from pais.config import Settings
@@ -18,13 +28,14 @@ from pais.errors import PaisError
 from pais.ingest import SPLITTER_REGISTRY, get_splitter
 from pais.ingest.runner import IngestReport, ingest_path, write_report
 
-ingest_app = typer.Typer(help="Ingest files into a PAIS index.", invoke_without_command=False)
-splitters_app = typer.Typer(help="Inspect available splitters.")
-alias_app = typer.Typer(help="Inspect / clear the alias resolution cache.")
-
-_OutputOpt = typer.Option("table", "--output", "-o", help="table | json | yaml")
-_ReportOpt = typer.Option(
-    Path("./ingest-report.json"), "--report", help="Where to write the JSON ingest report."
+ingest_app = typer.Typer(
+    help="Ingest files into a PAIS index.",
+    invoke_without_command=False,
+    context_settings=HELP_OPTION_NAMES,
+)
+splitters_app = typer.Typer(help="Inspect available splitters.", context_settings=HELP_OPTION_NAMES)
+alias_app = typer.Typer(
+    help="Inspect / clear the alias resolution cache.", context_settings=HELP_OPTION_NAMES
 )
 
 
@@ -51,23 +62,12 @@ def ingest_root(
         ..., metavar="<kb_ref>:<index_ref>", help="Target index. Both refs may be aliases or UUIDs."
     ),
     path: Path = typer.Argument(..., metavar="PATH", help="File or directory to ingest."),
-    splitter_kind: str | None = typer.Option(
-        None, "--splitter", help="Override the splitter declared in the config for this index."
-    ),
-    replace: bool = typer.Option(
-        False,
-        "--replace",
-        help=(
-            "Before uploading, delete docs whose origin_name starts with the splitter's "
-            "group_key for each input file. Other docs in the index are untouched."
-        ),
-    ),
-    workers: int = typer.Option(4, "--workers", min=1, max=32),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Split locally + report; no DELETE, no POST."
-    ),
-    report_path: Path = _ReportOpt,
-    output: str = _OutputOpt,
+    splitter_kind: str | None = SPLITTER_OPT,
+    replace: bool = REPLACE_OPT,
+    workers: int = WORKERS_OPT,
+    dry_run: bool = DRY_RUN_OPT,
+    report_path: Path = REPORT_OPT,
+    output: str = OUTPUT_OPT,
 ) -> None:
     """Run a splitter over PATH and upload the chunks to <kb_ref>:<index_ref>."""
 
@@ -154,14 +154,14 @@ def _print_summary(report: IngestReport, report_path: Path, *, output: str) -> N
 
 
 @splitters_app.command("list")
-def splitters_list(output: str = _OutputOpt) -> None:
+def splitters_list(output: str = OUTPUT_OPT) -> None:
     """List every registered splitter kind."""
     rows = [{"kind": k, "class": cls.__name__} for k, cls in sorted(SPLITTER_REGISTRY.items())]
     render(rows, fmt=output, columns=["kind", "class"])
 
 
 @splitters_app.command("show")
-def splitters_show(kind: str, output: str = _OutputOpt) -> None:
+def splitters_show(kind: str, output: str = OUTPUT_OPT) -> None:
     """Show the option schema for one splitter kind."""
 
     def go() -> None:
@@ -184,7 +184,7 @@ def splitters_show(kind: str, output: str = _OutputOpt) -> None:
 
 
 @alias_app.command("list")
-def alias_list(output: str = _OutputOpt) -> None:
+def alias_list(output: str = OUTPUT_OPT) -> None:
     """Print the alias resolution cache."""
     render(_alias.list_cache(), fmt=output)
 
@@ -194,7 +194,7 @@ def alias_clear(
     alias: str | None = typer.Argument(
         None, help="Specific alias to clear; omit to wipe everything."
     ),
-    profile: str | None = typer.Option(None, "--profile"),
+    profile: str | None = PROFILE_OPT,
 ) -> None:
     """Invalidate cached UUID resolutions."""
     _alias.clear_cache(alias, profile=profile)
