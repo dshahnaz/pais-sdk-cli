@@ -21,7 +21,10 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pais.cli._profile_config import ProfileConfig
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -60,11 +63,49 @@ def load_profile(
     path: Path | str | None = None,
     profile: str | None = None,
 ) -> tuple[dict[str, Any], Path | None, str]:
-    """Load the active profile from a config file.
+    """Load the active profile's connection settings from a config file.
 
     Returns: (settings_dict, config_file_used, profile_name_resolved).
-    If no config file is found, returns ({}, None, profile or 'default').
+    The dict has the `knowledge_bases` block stripped — Settings only sees
+    connection-level keys. Use `load_profile_config()` to get the typed KB tree.
     """
+    section, used_path, name = _load_section(path=path, profile=profile)
+    flat = {k: v for k, v in section.items() if k != "knowledge_bases"}
+    return flat, used_path, name
+
+
+def load_profile_config(
+    *,
+    path: Path | str | None = None,
+    profile: str | None = None,
+) -> tuple[ProfileConfig, Path | None, str]:
+    """Load the typed KB/index/splitter tree for the active profile.
+
+    Returns: (ProfileConfig, config_file_used, profile_name_resolved).
+    Empty ProfileConfig (no KBs) when no config file is found or no
+    `[profiles.X.knowledge_bases.*]` blocks are declared.
+    """
+    from pais.cli._profile_config import ProfileConfig, parse_profile_config
+
+    try:
+        section, used_path, name = _load_section(path=path, profile=profile)
+    except ConfigError:
+        raise
+    if used_path is None:
+        return ProfileConfig(), None, name
+    try:
+        cfg = parse_profile_config({"knowledge_bases": section.get("knowledge_bases", {})})
+    except Exception as e:
+        raise ConfigError(
+            f"{used_path} [profile={name}]: invalid knowledge_bases / index / splitter config: {e}"
+        ) from e
+    return cfg, used_path, name
+
+
+def _load_section(
+    *, path: Path | str | None, profile: str | None
+) -> tuple[dict[str, Any], Path | None, str]:
+    """Resolve config file + profile, return (raw_section_dict, path, profile_name)."""
     cfg_path = discover_config_path(path)
     if cfg_path is None:
         return {}, None, profile or os.environ.get("PAIS_PROFILE") or "default"
@@ -81,8 +122,6 @@ def load_profile(
         raise ConfigError(f"{cfg_path}: 'profiles' must be a table")
 
     if not profiles:
-        # Allow a flat config file with no [profiles.X] sections — treat top-level
-        # keys (other than `default_profile`) as the active profile.
         flat = {k: v for k, v in raw.items() if k != "default_profile"}
         _check_forbidden(cfg_path, name, flat)
         return flat, cfg_path, name

@@ -1,6 +1,23 @@
-# Test-suite ingestion
+# Ingestion (v0.4+)
 
-How the `pais-dev` splitter + batch uploader turn ~300 structured markdown test-suite files into a searchable PAIS knowledge base.
+`pais ingest <kb_ref>:<index_ref> <path>` is the generic data-feed command. It looks up the splitter declared on the target index in your TOML config (or `--splitter <kind>` for one-off use), runs that splitter over `path` (file or directory), and uploads the resulting chunks to PAIS.
+
+## Splitter registry (built-ins)
+
+| kind | best for | options (TOML) |
+|---|---|---|
+| `test_suite_md` | structured test-suite markdown — atomic per-section files with breadcrumb headers | `budget_tokens` |
+| `markdown_headings` | any markdown — split at H2 (default) or H3, optional breadcrumb | `heading_level`, `breadcrumb` |
+| `passthrough` | PDFs, plain text, anything where PAIS should do its own splitting | — |
+| `text_chunks` | plain text / logs — sliding-window chunker | `chunk_chars`, `overlap_chars` |
+
+`pais splitters list` and `pais splitters show <kind>` print the registry and option JSON schemas.
+
+Splitters live under `src/pais/ingest/splitters/` and self-register via the `@register_splitter` decorator. Adding a 5th is one file.
+
+## Why `test_suite_md` exists (the original use case)
+
+Each suite file is highly structured markdown:
 
 ## The problem
 

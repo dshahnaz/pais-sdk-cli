@@ -23,10 +23,14 @@ One-page map of where things live in this repo.
 │  src/pais/client.py          PaisClient facade            │
 │  src/pais/resources/*.py     one file per resource group  │
 │  src/pais/models/*.py        contract-first pydantic      │
-│  src/pais/dev/*.py           test-suite ingestion helpers │
 │  src/pais/auth/*.py          none | bearer | oidc_password│
 │  src/pais/logging.py         structlog + redaction        │
 │  src/pais/errors.py          PaisError hierarchy          │
+│                                                           │
+│  src/pais/ingest/registry.py    splitter plug-in registry │
+│  src/pais/ingest/splitters/*.py 4 built-in splitters      │
+│  src/pais/ingest/runner.py      generic ingest pipeline   │
+│  src/pais/dev/*.py              legacy helpers (internal) │
 └────────────────────────┬──────────────────────────────────┘
                          │
 ┌────────────────────────▼──────────────────────────────────┐
