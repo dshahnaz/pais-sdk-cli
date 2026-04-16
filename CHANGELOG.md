@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.6.0 · task-centric workflows + smart landing screen
+
+Purely additive — no breaking changes. The interactive shell now opens with a smart landing screen and offers 7 task-oriented workflows (set up agent, ingest, chat, search, cleanup, …) on top of the v0.5 flat command list.
+
+### Added
+- **Smart landing screen.** Bare `pais` (in a TTY) now opens with a one-line state snapshot (KBs · indexes · agents · drift), a recommended workflow based on env state (no agents → "Set up an agent"; drift → "Apply pending TOML"; otherwise → "Chat"), and a compact menu of all 7 workflows + a `📋 all commands…` fallback to the v0.5 flat list. Mode badge is colour-coded (`http` green, `mock` red).
+- **7 task-centric workflows** in `pais.cli._workflows.*`:
+  - **Set up a chat agent over my docs** — pick-or-create KB → pick-or-create index → optional save to `pais.toml` → create agent (doc-aligned `index_id`) → branch into ingest / chat / status.
+  - **Provision KB + index (no agent)** — same first two steps, then stop.
+  - **Apply pending TOML config** — drift preview → confirm → run `kb ensure` → branch to ingest each newly-created index.
+  - **Ingest data into an index** — pick KB+index → splitter from config-or-prompt → path → optional `--replace` → progress bar → branch to search.
+  - **Chat with an agent** — pick agent → multi-line prompt loop with `rich.spinner` while LLM thinks.
+  - **Search an index (no LLM)** — pick KB+index → query → ranked hits with score / origin / snippet.
+  - **Cleanup (delete KB / index / agent)** — pick kind → pick item → **type-to-confirm** (GitHub-style, the resource name) → delete.
+- **Pick-or-create pickers**: `pick_or_create_kb` / `_index` / `_agent` / `_splitter_config` show ★-marked recents at the top, then existing items, then `+ create new` and `✏ enter manually`.
+- **Single-screen review** for create flows: instead of 5+ separate yes/no prompts, all defaults are pre-filled in a key-value panel; user picks `✅ Go` / `✏ Edit <field>` / `← back`. Hints (e.g. `chunk_size 512  ↑ ≈ 2KB English text per chunk; tokens, not chars`) explain non-obvious defaults inline.
+- **Post-success "what next?" menus** with the most-relevant follow-up highlighted and the rest greyed out (in `mock` mode, "Chat" carries a `(mock — canned answers)` annotation).
+- **Type-to-confirm** for destructive ops (the user must type the resource's exact name to proceed). `--quick-confirm` / `-Q` flag and `PAIS_QUICK_CONFIRM=1` env var fall back to `y/N` for power users.
+- **Recent-targets memory** at `~/.pais/recent.json` (per-profile, LRU-capped at 10 per kind). Pickers prepend the last-3 with `★`.
+- **Safe TOML writeback** in `pais.cli._config_writeback`. Append-only, idempotent, unified-diff preview before write, refuses to write if the existing file fails to parse. Comments and unknown sections above the `# --- added by pais workflows ---` marker stay byte-for-byte. Uses `tomli-w` (new runtime dep, ~30 KB).
+
+### SDK alignment with the official Broadcom doc
+> Doc URL added to `CLAUDE.md`: <https://developer.broadcom.com/xapis/vmware-private-ai-service-api/latest/>
+- **`AgentCreate` / `Agent` gain `index_id` + `index_top_n`** matching the published spec for `POST /compatibility/openai/v1/agents`. The legacy `tools=[ToolLink]` shape is preserved for back-compat with deployments that need it; new code paths default to `index_id`.
+- **`DataOriginType` enum** gains the doc-aligned plural value `DATA_SOURCES` alongside the existing `LOCAL_FILES` and `DATA_SOURCE`.
+- New contract test exercises both shapes round-tripping through the SDK + mock.
+
+### Process
+- **Standing rule promoted to `CLAUDE.md`**: every plan-mode session that touches PAIS endpoints must `WebFetch` the doc URL **as Step 0** — before any design work. Two past misses (v0.4 `chunk_size` units, v0.6 agent `index_id`) drove this.
+
 ## 0.5.0 · interactive shell + `pais-dev` script removed
 
 ### ⚠️ Breaking changes

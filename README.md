@@ -48,24 +48,44 @@ pais kb list
 
 ## Interactive mode
 
-Run `pais` (no args) in a terminal and it drops into a menu:
+Run `pais` (no args) in a terminal and it opens with a smart landing screen:
 
 ```text
 $ pais
-PAIS interactive shell · profile=lab · mode=http
-Pick a command (type to filter, ↵ to select). ⏏ quit to exit.
+profile=lab  ·  mode=http (real PAIS)
+3 KBs  ·  5 indexes  ·  2 agents  · 0 drift
 
-> status                    Full env overview: profile, server, KBs, indexes, drift
-  kb show                   KB header + per-index breakdown
-  kb ensure                 Materialize the declarative knowledge_bases / indexes …
-  index delete              Delete an index entirely (cascades documents).
-  ingest                    Run a splitter over PATH and upload the chunks …
-  ...
+recommended: 💬  Chat with an agent
+
+> 💬  Chat with an agent
+  🤖  Set up a chat agent over my docs
+  📦  Provision KB + index (no agent)
+  🔧  Apply pending TOML config
+  📥  Ingest data into an index
+  🔎  Search an index (no LLM)
+  🗑  Cleanup (delete KB / index / agent)
+  📋  all commands…
 ```
 
-Pick `index delete` and the menu fetches the live KB list, lets you select one, then fetches indexes under that KB and lets you select which to remove — no UUID typing. Destructive ops always confirm with the resolved name + UUID before executing.
+The recommended workflow is chosen from your env state (no agents → "Set up an agent"; drift detected → "Apply pending TOML"). Each workflow walks you through the steps with **pick-or-create lists** (showing existing items + `+ create new`), **single-screen reviews** of all defaults (with one-line hints — e.g. `chunk_size 512  ↑ tokens, not chars`), and a **"what next?"** menu after success.
 
-`pais shell` opens the menu explicitly. To opt out of the bare-`pais` trigger, pass `--no-interactive` or set `PAIS_NONINTERACTIVE=1`. Non-TTY callers (pipes, scripts, CI) always print the help banner, never the menu.
+**Set up an agent** is the headline flow:
+```
+🤖 Set up a chat agent over my docs.
+1. Pick or create a KB
+2. (optional) save it as alias `prod_docs` in pais.toml
+3. Pick or create an index under it
+4. (optional) save the index alias too
+5. Create the agent (index_id + index_top_n, doc-aligned)
+6. → Ingest data into this index now (recommended — index is empty)
+   💬 Chat with it
+   📊 View `pais status`
+   ✅ Done
+```
+
+Destructive ops use **type-to-confirm** (you type the resource name to proceed). `--quick-confirm` / `-Q` falls back to `y/N` for power users.
+
+`pais shell` opens the menu explicitly. To opt out of the bare-`pais` trigger, pass `--no-interactive` or set `PAIS_NONINTERACTIVE=1`. Non-TTY callers (pipes, scripts, CI) always print the help banner, never the menu. Pick `📋  all commands…` from the landing screen for the full v0.5-style flat command list.
 
 ## Persistent config
 

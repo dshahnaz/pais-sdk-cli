@@ -262,11 +262,7 @@ def pick_or_create_kb(ctx: PickerContext) -> Any:
     pairs: list[tuple[str, str]] = []
     for kb in kbs:
         alias = name_to_alias.get(kb.name)
-        title = (
-            f"{alias}  —  {kb.name}  ({kb.id})"
-            if alias
-            else f"—  {kb.name}  ({kb.id})"
-        )
+        title = f"{alias}  —  {kb.name}  ({kb.id})" if alias else f"—  {kb.name}  ({kb.id})"
         pairs.append((alias or kb.id, title))
     title_for_value = {v: t for v, t in pairs}
 
@@ -424,9 +420,7 @@ def pick_or_create_splitter_config(_ctx: PickerContext) -> Any:
     kinds = sorted(SPLITTER_REGISTRY)
     if not kinds:
         return _manual_fallback("no splitters registered; type a kind:")
-    pick = questionary.select(
-        "Pick a splitter kind:", choices=[*kinds, _DIVIDER, _MANUAL]
-    ).ask()
+    pick = questionary.select("Pick a splitter kind:", choices=[*kinds, _DIVIDER, _MANUAL]).ask()
     if pick is None or pick == _DIVIDER:
         return CANCEL
     if pick == _MANUAL:

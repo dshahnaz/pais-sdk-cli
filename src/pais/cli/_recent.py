@@ -22,7 +22,7 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 Kind = Literal["kbs", "indexes", "agents"]
 
@@ -67,7 +67,7 @@ def clear(profile: str | None = None) -> None:
             _save(cache)
 
 
-def _load() -> dict:
+def _load() -> dict[str, Any]:
     if not CACHE_PATH.exists():
         return {}
     try:
@@ -78,15 +78,15 @@ def _load() -> dict:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _save(data: dict) -> None:
+def _save(data: dict[str, Any]) -> None:
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = CACHE_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, indent=2))
     os.replace(tmp, CACHE_PATH)
 
 
-def _profile_bucket(cache: dict, profile: str) -> dict:
-    bucket = cache.setdefault(profile, {})
+def _profile_bucket(cache: dict[str, Any], profile: str) -> dict[str, Any]:
+    bucket: dict[str, Any] = cache.setdefault(profile, {})
     bucket.setdefault("kbs", [])
     bucket.setdefault("indexes", [])
     bucket.setdefault("agents", [])

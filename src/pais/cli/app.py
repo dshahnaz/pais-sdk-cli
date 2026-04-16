@@ -94,6 +94,12 @@ def _root(
         "--no-interactive",
         help="Disable bare-`pais` dropping into the interactive menu.",
     ),
+    quick_confirm: bool = typer.Option(
+        False,
+        "--quick-confirm",
+        "-Q",
+        help="Use y/N for destructive ops in the shell (skip type-to-confirm).",
+    ),
 ) -> None:
     """Pin --config / --profile so every subcommand's Settings() picks them up.
 
@@ -102,6 +108,8 @@ def _root(
     interactive menu. Non-TTY callers (scripts, pipes) get the help banner.
     """
     set_runtime_overrides(config_path=config, profile=profile)
+    if quick_confirm:
+        os.environ["PAIS_QUICK_CONFIRM"] = "1"
     # Eager validation: surface config-file errors here with a clean message
     # rather than letting them bubble up as a Python traceback later.
     from pais.cli._config_file import ConfigError, load_profile

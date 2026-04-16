@@ -90,11 +90,7 @@ def append_index_block(
         idx["description"] = description
     if splitter_kind:
         idx["splitter"] = {"kind": splitter_kind, **(splitter_options or {})}
-    payload = {
-        "profiles": {
-            profile: {"knowledge_bases": {kb_alias: {"indexes": [idx]}}}
-        }
-    }
+    payload = {"profiles": {profile: {"knowledge_bases": {kb_alias: {"indexes": [idx]}}}}}
     return tomli_w.dumps(payload)
 
 
@@ -108,14 +104,10 @@ def block_exists(config_path: Path, profile: str, kb_alias: str) -> bool:
         raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
         raise WritebackError(f"{config_path}: invalid TOML: {e}") from e
-    return (
-        kb_alias in raw.get("profiles", {}).get(profile, {}).get("knowledge_bases", {})
-    )
+    return kb_alias in raw.get("profiles", {}).get(profile, {}).get("knowledge_bases", {})
 
 
-def index_exists(
-    config_path: Path, profile: str, kb_alias: str, idx_alias: str
-) -> bool:
+def index_exists(config_path: Path, profile: str, kb_alias: str, idx_alias: str) -> bool:
     if not config_path.exists():
         return False
     try:

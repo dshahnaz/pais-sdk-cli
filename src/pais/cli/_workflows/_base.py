@@ -1,11 +1,11 @@
 """Workflow primitives: dataclass + the four UX helpers every workflow uses.
 
-  * `Workflow`            — registry entry (name/icon/description/run)
-  * `branch_yes_no`       — Esc-aware yes/no with default highlight
-  * `done_banner`         — green ✓ summary block
-  * `prompt_review_screen`— single-screen Go/Edit/Back review of N defaults
-  * `next_actions_menu`   — post-success "what next?" picker
-  * `confirm_by_typing`   — type-the-resource-name destructive confirm
+* `Workflow`            — registry entry (name/icon/description/run)
+* `branch_yes_no`       — Esc-aware yes/no with default highlight
+* `done_banner`         — green ✓ summary block
+* `prompt_review_screen`— single-screen Go/Edit/Back review of N defaults
+* `next_actions_menu`   — post-success "what next?" picker
+* `confirm_by_typing`   — type-the-resource-name destructive confirm
 """
 
 from __future__ import annotations
@@ -132,9 +132,7 @@ def prompt_review_screen(spec: ReviewSpec, console: Console) -> dict[str, Any] |
         if target_field.re_prompt is not None:
             new_val = target_field.re_prompt(target_field.value)
         else:
-            ans = questionary.text(
-                f"{target}:", default=_fmt(target_field.value)
-            ).ask()
+            ans = questionary.text(f"{target}:", default=_fmt(target_field.value)).ask()
             if ans is None:
                 continue
             new_val = ans
@@ -190,7 +188,7 @@ def confirm_by_typing(label: str, *, expected: str) -> bool:
     typed = questionary.text(
         f"{label}\nType '{expected}' to confirm (anything else cancels):"
     ).ask()
-    return typed == expected
+    return bool(typed == expected)
 
 
 # ----- helpers ---------------------------------------------------------------
