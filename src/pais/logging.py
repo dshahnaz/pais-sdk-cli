@@ -91,6 +91,19 @@ def _request_id_processor(_logger: WrappedLogger, _name: str, event_dict: EventD
     return event_dict
 
 
+def _silence_third_party() -> None:
+    """Quiet the third-party loggers that produce noise without actionable info.
+
+    `httpx`/`httpcore` per-request lines are redundant — `pais.request` carries
+    the same data with our request_id. `huggingface_hub` warnings about HF_TOKEN
+    aren't actionable in this context. Verbose mode lifts the floor by re-running
+    `configure_logging` at INFO/DEBUG — these get bumped back up automatically.
+    """
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+
+
 def configure_logging(
     *,
     level: str = "INFO",
@@ -102,6 +115,7 @@ def configure_logging(
 
     root = logging.getLogger()
     root.setLevel(lvl)
+    _silence_third_party()
     # Clear existing handlers so re-configuration is clean in tests.
     for h in list(root.handlers):
         root.removeHandler(h)

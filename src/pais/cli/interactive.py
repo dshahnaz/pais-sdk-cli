@@ -55,11 +55,26 @@ def enter_interactive(app: typer.Typer) -> None:
     bare entry shows env state + a recommended workflow; the user picks a
     workflow (orchestrated multi-step flow) OR falls through to the flat
     typer command list.
+
+    v0.6.2: defaults to WARNING-level logs (the per-request `pais.request`
+    INFO lines are noise inside an interactive session). `pais -v` or
+    `PAIS_VERBOSE=1` lifts the floor back to INFO for troubleshooting.
     """
+    import os as _os
+
     from pais.cli._landing import show_landing
+    from pais.logging import configure_logging
 
     console = Console()
     settings = Settings()
+
+    # Quiet by default; verbose env opts back into the configured level.
+    if not _os.environ.get("PAIS_VERBOSE"):
+        configure_logging(
+            level="WARNING",
+            log_file=settings.log_file,
+            json_console=settings.log_json_console,
+        )
 
     while True:
         try:

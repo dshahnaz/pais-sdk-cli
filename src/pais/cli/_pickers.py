@@ -34,7 +34,9 @@ from pais.ingest.registry import SPLITTER_REGISTRY
 
 _MANUAL = "✏  enter manually"
 _CREATE = "+  create new"
+_BACK = "←  back"
 _DIVIDER = "─" * 30
+_BACK_HINT = "Ctrl-C / Esc → back"
 
 
 @dataclass
@@ -77,10 +79,12 @@ def pick_kb(ctx: PickerContext) -> Any:
             title = f"—  {kb.name}  ({kb.id})"
             value_for_title[title] = kb.id
         choices.append(title)
+    choices.append(_DIVIDER)
     choices.append(_MANUAL)
+    choices.append(_BACK)
 
-    pick = questionary.select("Pick a KB:", choices=choices).ask()
-    if pick is None:
+    pick = questionary.select("Pick a KB:", choices=choices, instruction=_BACK_HINT).ask()
+    if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _MANUAL:
         return _manual_fallback("type a KB alias or UUID:")
@@ -124,10 +128,14 @@ def pick_index(ctx: PickerContext) -> Any:
             title = f"—  {ix.name}  (status={status}, docs={docs}, id={ix.id})"
             value_for_title[title] = ix.id
         choices.append(title)
+    choices.append(_DIVIDER)
     choices.append(_MANUAL)
+    choices.append(_BACK)
 
-    pick = questionary.select(f"Pick an index under {kb_ref}:", choices=choices).ask()
-    if pick is None:
+    pick = questionary.select(
+        f"Pick an index under {kb_ref}:", choices=choices, instruction=_BACK_HINT
+    ).ask()
+    if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _MANUAL:
         return _manual_fallback("type an index alias or UUID:")
@@ -147,9 +155,11 @@ def pick_agent(ctx: PickerContext) -> Any:
         title = f"{a.name}  —  {getattr(a, 'model', '—')}  ({a.id})"
         value_for_title[title] = a.id
         choices.append(title)
+    choices.append(_DIVIDER)
     choices.append(_MANUAL)
-    pick = questionary.select("Pick an agent:", choices=choices).ask()
-    if pick is None:
+    choices.append(_BACK)
+    pick = questionary.select("Pick an agent:", choices=choices, instruction=_BACK_HINT).ask()
+    if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _MANUAL:
         return _manual_fallback("type an agent UUID:")
@@ -160,8 +170,12 @@ def pick_splitter_kind(_ctx: PickerContext) -> Any:
     kinds = sorted(SPLITTER_REGISTRY)
     if not kinds:
         return _manual_fallback("no splitters registered; type a kind:")
-    pick = questionary.select("Pick a splitter kind:", choices=[*kinds, _MANUAL]).ask()
-    if pick is None:
+    pick = questionary.select(
+        "Pick a splitter kind:",
+        choices=[*kinds, _DIVIDER, _MANUAL, _BACK],
+        instruction=_BACK_HINT,
+    ).ask()
+    if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _MANUAL:
         return _manual_fallback("type a splitter kind:")
@@ -178,8 +192,12 @@ def pick_cached_alias(_ctx: PickerContext) -> Any:
             titles.append(f"{profile}/{alias}")
     if not titles:
         return _manual_fallback("alias cache is empty; type an alias to clear (or just Enter):")
-    pick = questionary.select("Pick a cached alias to clear:", choices=[*titles, _MANUAL]).ask()
-    if pick is None:
+    pick = questionary.select(
+        "Pick a cached alias to clear:",
+        choices=[*titles, _DIVIDER, _MANUAL, _BACK],
+        instruction=_BACK_HINT,
+    ).ask()
+    if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _MANUAL:
         return _manual_fallback("type an alias:")
@@ -199,9 +217,13 @@ def pick_mcp_tool(ctx: PickerContext) -> Any:
         title = f"{t.name}  —  {getattr(t, 'description', '') or ''}  ({t.id})"
         value_for_title[title] = t.id
         choices.append(title)
+    choices.append(_DIVIDER)
     choices.append(_MANUAL)
-    pick = questionary.select("Pick an MCP tool to link:", choices=choices).ask()
-    if pick is None:
+    choices.append(_BACK)
+    pick = questionary.select(
+        "Pick an MCP tool to link:", choices=choices, instruction=_BACK_HINT
+    ).ask()
+    if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _MANUAL:
         return _manual_fallback("type a tool UUID (or skip):")
@@ -289,11 +311,12 @@ def pick_or_create_kb(ctx: PickerContext) -> Any:
         choices.append(_DIVIDER)
     choices.append(_CREATE)
     choices.append(_MANUAL)
+    choices.append(_BACK)
 
-    pick = questionary.select("Pick a KB (or create new):", choices=choices).ask()
-    if pick is None:
-        return CANCEL
-    if pick == _DIVIDER:
+    pick = questionary.select(
+        "Pick a KB (or create new):", choices=choices, instruction=_BACK_HINT
+    ).ask()
+    if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _CREATE:
         return CREATE_NEW
@@ -358,11 +381,14 @@ def pick_or_create_index(ctx: PickerContext) -> Any:
         choices.append(_DIVIDER)
     choices.append(_CREATE)
     choices.append(_MANUAL)
+    choices.append(_BACK)
 
     pick = questionary.select(
-        f"Pick an index under {kb_ref} (or create new):", choices=choices
+        f"Pick an index under {kb_ref} (or create new):",
+        choices=choices,
+        instruction=_BACK_HINT,
     ).ask()
-    if pick is None or pick == _DIVIDER:
+    if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _CREATE:
         return CREATE_NEW
@@ -404,9 +430,12 @@ def pick_or_create_agent(ctx: PickerContext) -> Any:
         choices.append(_DIVIDER)
     choices.append(_CREATE)
     choices.append(_MANUAL)
+    choices.append(_BACK)
 
-    pick = questionary.select("Pick an agent (or create new):", choices=choices).ask()
-    if pick is None or pick == _DIVIDER:
+    pick = questionary.select(
+        "Pick an agent (or create new):", choices=choices, instruction=_BACK_HINT
+    ).ask()
+    if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _CREATE:
         return CREATE_NEW
@@ -431,8 +460,12 @@ def pick_or_create_splitter_config(_ctx: PickerContext) -> Any:
         titles.append(title)
         value_for_title[title] = k
 
-    pick = questionary.select("Pick a splitter kind:", choices=[*titles, _DIVIDER, _MANUAL]).ask()
-    if pick is None or pick == _DIVIDER:
+    pick = questionary.select(
+        "Pick a splitter kind:",
+        choices=[*titles, _DIVIDER, _MANUAL, _BACK],
+        instruction=_BACK_HINT,
+    ).ask()
+    if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _MANUAL:
         return _manual_fallback("type a splitter kind:")
