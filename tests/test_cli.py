@@ -182,12 +182,17 @@ def test_not_found_exits_2(mock_runner: CliRunner) -> None:
     assert r.exit_code == 2, r.output
 
 
-def test_config_init_writes_scaffold(mock_runner: CliRunner) -> None:
-    # Direct project-write is exercised in test_config_file via the loader.
-    # Here we just verify init runs end-to-end (it may write or refuse if file
-    # already exists in the working dir).
+def test_config_init_writes_scaffold(
+    mock_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # chdir to tmp so --project writes there, not into the repo root.
+    monkeypatch.chdir(tmp_path)
     r = mock_runner.invoke(cli_app, ["config", "init", "--project"], catch_exceptions=False)
-    assert r.exit_code in (0, 1)
+    assert r.exit_code == 0, r.output
+    assert (tmp_path / "pais.toml").exists()
+    # Refuses to overwrite without --force.
+    r2 = mock_runner.invoke(cli_app, ["config", "init", "--project"], catch_exceptions=False)
+    assert r2.exit_code == 1
 
 
 def test_config_show_redacts_secrets(mock_runner: CliRunner) -> None:
