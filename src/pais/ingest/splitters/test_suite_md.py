@@ -19,7 +19,7 @@ from pais.dev.split_suite import (
     split_suite,
 )
 from pais.ingest.registry import register_splitter
-from pais.ingest.splitters._base import SplitDoc, SplitterOptionsBase
+from pais.ingest.splitters._base import SplitDoc, SplitterMeta, SplitterOptionsBase
 
 
 class TestSuiteMdOptions(SplitterOptionsBase):
@@ -44,6 +44,25 @@ class TestSuiteMdSplitter:
 
     kind: ClassVar[str] = "test_suite_md"
     options_model: ClassVar[type[TestSuiteMdOptions]] = TestSuiteMdOptions
+    meta: ClassVar[SplitterMeta] = SplitterMeta(
+        summary="Atomic per-section split for H1/H2/H3 test-suite markdown",
+        input_type="structured markdown (H1=suite, H2=section, H3=subsection)",
+        algorithm=(
+            "Walks the H1/H2/H3 tree. Emits one chunk per H2 (or H3 leaf) section, "
+            "prepended with a `# Doc / ## Section` breadcrumb so the LLM has context "
+            "even when only that chunk is retrieved. Sections over `budget_tokens` "
+            "are sub-split."
+        ),
+        chunk_size_unit="tokens",
+        typical_chunk_size="≈ 400 tokens (~1.5 KB English)",
+        token_char_hint="≈ 4 chars/token (English, BAAI/bge-small-en-v1.5)",
+        example_input="~/Downloads/Access-Management.md (a structured test-suite file)",
+        notes=(
+            "Designed for the user's existing test-suite markdown. Generic markdown "
+            "should use `markdown_headings` instead.",
+            "`group_key` is the H1 slug (`<SuiteSlug>__`) — used by --replace.",
+        ),
+    )
 
     def __init__(self, options: TestSuiteMdOptions) -> None:
         self._options = options

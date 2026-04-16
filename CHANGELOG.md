@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.1 · splitter discoverability + observability
+
+Purely additive — no breaking changes. Picking the right splitter is now obvious without reading source.
+
+### Added
+- **Every splitter now declares structured metadata** (`SplitterMeta`): summary, input type, algorithm, chunk-size unit (tokens/chars/file), typical chunk size, token↔char hint, example input, notes. Surfaced everywhere a splitter is shown.
+- **`pais splitters list`** default output now has `kind` + `summary`. New `-v/--verbose` adds `input`, `chunk_size`, and `unit` columns.
+- **`pais splitters show <kind>`** — replaces the v0.6 raw JSON-schema dump with a rich panel: tagline → input → algorithm → output (unit + typical size + token↔char) → options table (with constraints) → notes. JSON output (`-o json`) returns the meta as a structured dict.
+- **NEW `pais splitters preview <kind> <path>`** — runs the splitter against a real file/dir (dry-run, no upload) and reports:
+  - chunk count
+  - char distribution (min / median / max)
+  - **token distribution** (when `tokenizers` is installed) under `BAAI/bge-small-en-v1.5`
+  - measured **chars/token ratio** for your actual content
+  - first 300 chars of chunk #1 as a sample
+  - `--limit N` and `--max-bytes N` caps for directory scans
+
+  Falls back gracefully to char-only stats when `tokenizers` isn't installed.
+- **Interactive shell** (`pick_or_create_splitter_config` + workflow B) shows each splitter's summary and typical chunk size inline, then prints a 2-line brief (input + chunk) right before the path prompt.
+
 ## 0.6.0 · task-centric workflows + smart landing screen
 
 Purely additive — no breaking changes. The interactive shell now opens with a smart landing screen and offers 7 task-oriented workflows (set up agent, ingest, chat, search, cleanup, …) on top of the v0.5 flat command list.

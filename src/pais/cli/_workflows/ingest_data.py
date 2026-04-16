@@ -90,6 +90,17 @@ def run(
     cls = get_splitter(splitter_kind)
     splitter = cls(splitter_options)
 
+    # Splitter brief — show the user exactly what they're about to run.
+    from pais.ingest.splitters._base import meta_for
+
+    m = meta_for(cls)
+    hint = f"  [dim]({m.token_char_hint})[/dim]" if m.token_char_hint else ""
+    console.print(
+        f"\n[bold]splitter:[/bold] [cyan]{splitter_kind}[/cyan]\n"
+        f"  [dim]input:[/dim] {m.input_type}\n"
+        f"  [dim]chunk:[/dim] {m.typical_chunk_size}{hint}\n"
+    )
+
     # Path
     path_str = questionary.path("path (file or directory):").ask()
     if not path_str:

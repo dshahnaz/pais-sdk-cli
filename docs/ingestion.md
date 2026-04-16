@@ -4,16 +4,29 @@
 
 ## Splitter registry (built-ins)
 
-| kind | best for | options (TOML) |
-|---|---|---|
-| `test_suite_md` | structured test-suite markdown — atomic per-section files with breadcrumb headers | `budget_tokens` |
-| `markdown_headings` | any markdown — split at H2 (default) or H3, optional breadcrumb | `heading_level`, `breadcrumb` |
-| `passthrough` | PDFs, plain text, anything where PAIS should do its own splitting | — |
-| `text_chunks` | plain text / logs — sliding-window chunker | `chunk_chars`, `overlap_chars` |
+| kind | summary | input | typical chunk |
+|---|---|---|---|
+| `test_suite_md` | Atomic per-section split for H1/H2/H3 test-suite markdown | structured markdown (H1=suite, H2=section, H3=subsection) | ≈ 400 tokens (~1.5 KB English) |
+| `markdown_headings` | Generic markdown split at a configurable heading level | any markdown with headings | variable — one chunk per H2 (or H3) |
+| `passthrough` | Upload each file as-is; PAIS handles all splitting | any file (binary OK) | = file size (1 chunk per file) |
+| `text_chunks` | Sliding character window with configurable overlap | any UTF-8 text (logs, plain text) | 1500 chars (≈ 375 tokens English) with 100-char overlap |
 
-`pais splitters list` and `pais splitters show <kind>` print the registry and option JSON schemas.
+> The table above is **mirrored from `meta` declared on each splitter class** (`src/pais/ingest/splitters/<kind>.py`). When the in-code `meta` changes, this doc should be updated to match — a v0.7 follow-up will generate the table directly from `meta` at build time.
 
-Splitters live under `src/pais/ingest/splitters/` and self-register via the `@register_splitter` decorator. Adding a 5th is one file.
+### Inspect from the CLI (the source of truth)
+
+```bash
+pais splitters list                        # compact: kind + summary
+pais splitters list -v                     # adds input + chunk_size + unit
+pais splitters show <kind>                 # rich panel: input/algorithm/output/options/notes
+pais splitters preview <kind> <path>       # dry-run: chunk count + token & char distribution
+                                           # + measured chars/token ratio for YOUR content
+                                           # + first 300 chars of chunk #1 as a sample
+```
+
+`pais splitters preview` answers "how would this splitter chop my file?" without uploading anything. It uses `BAAI/bge-small-en-v1.5` for token counts (the default PAIS embedding model).
+
+Splitters live under `src/pais/ingest/splitters/` and self-register via the `@register_splitter` decorator. Each new splitter must declare a `meta: ClassVar[SplitterMeta]` so it shows up correctly in the CLI + interactive shell.
 
 ## Why `test_suite_md` exists (the original use case)
 

@@ -416,16 +416,27 @@ def pick_or_create_agent(ctx: PickerContext) -> Any:
 
 
 def pick_or_create_splitter_config(_ctx: PickerContext) -> Any:
-    """Pick a registered splitter kind, or 'enter manually'."""
+    """Pick a registered splitter kind. Each row shows summary + typical chunk size."""
+    from pais.ingest.splitters._base import meta_for
+
     kinds = sorted(SPLITTER_REGISTRY)
     if not kinds:
         return _manual_fallback("no splitters registered; type a kind:")
-    pick = questionary.select("Pick a splitter kind:", choices=[*kinds, _DIVIDER, _MANUAL]).ask()
+
+    titles: list[str] = []
+    value_for_title: dict[str, str] = {}
+    for k in kinds:
+        m = meta_for(SPLITTER_REGISTRY[k])
+        title = f"{k:20s} — {m.summary}  [{m.typical_chunk_size}]"
+        titles.append(title)
+        value_for_title[title] = k
+
+    pick = questionary.select("Pick a splitter kind:", choices=[*titles, _DIVIDER, _MANUAL]).ask()
     if pick is None or pick == _DIVIDER:
         return CANCEL
     if pick == _MANUAL:
         return _manual_fallback("type a splitter kind:")
-    return pick
+    return value_for_title[pick]
 
 
 # ----- helpers ----------------------------------------------------------------
