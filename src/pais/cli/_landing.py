@@ -128,7 +128,11 @@ def show_landing(client: PaisClient, settings: Settings, console: Console) -> Wo
     titles.append(_FALLBACK_FLAT_MENU)
 
     pick = questionary.select(
-        "command:", choices=titles, use_search_filter=True, use_jk_keys=False
+        "command:",
+        choices=titles,
+        use_search_filter=True,
+        use_jk_keys=False,
+        instruction="type to filter · Ctrl-C → exit shell",
     ).ask()
     if pick is None:
         return None

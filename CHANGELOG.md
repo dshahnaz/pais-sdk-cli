@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.2 · quiet interactive shell + visible back navigation
+
+Purely additive — no breaking changes. Two quality-of-life fixes for the v0.6 interactive shell.
+
+### Changed
+- **Interactive shell defaults to WARNING-level logs.** The per-request `pais.request` INFO lines and `httpx`'s `HTTP Request:` lines no longer drown the menu. The TLS-disabled warning still fires (it's important). Non-interactive subcommand calls (`pais kb list`, `pais ingest …`) are unaffected — they still emit INFO-level logs to stderr, so any script that greps them keeps working. The full INFO stream also still rotates to `~/.pais/logs/pais.log` regardless of console verbosity.
+
+### Added
+- **`pais -v` / `--verbose` global flag** (and `PAIS_VERBOSE=1` env var) — lifts the shell's WARNING floor back to INFO for troubleshooting. Honoured by every code path via the env var.
+- **Visible back navigation in the interactive shell.** Every picker now exposes an explicit `←  back` row alongside `+ create new` and `✏ enter manually`. Every prompt's instruction line shows `Ctrl-C / Esc → back` so the back-shortcut is discoverable. Same `CANCEL` sentinel for both paths — workflows handle them identically.
+- **Third-party loggers silenced by default** in `configure_logging`: `httpx` and `httpcore` floor at WARNING; `huggingface_hub` at ERROR. Verbose mode lifts all three.
+
 ## 0.6.1 · splitter discoverability + observability
 
 Purely additive — no breaking changes. Picking the right splitter is now obvious without reading source.

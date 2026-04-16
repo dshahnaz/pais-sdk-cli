@@ -116,7 +116,9 @@ def prompt_review_screen(spec: ReviewSpec, console: Console) -> dict[str, Any] |
             if f.editable:
                 choices.append(f"✏  Edit {f.name}")
         choices.append("← back")
-        pick = questionary.select("action:", choices=choices).ask()
+        pick = questionary.select(
+            "action:", choices=choices, instruction="Ctrl-C / Esc → back"
+        ).ask()
         if pick is None:
             return CANCEL
         if pick == "← back":
@@ -162,7 +164,9 @@ def next_actions_menu(actions: list[NextAction], console: Console) -> None:
         title = f"{prefix}{a.label}{ann}"
         titles.append(title)
         by_title[title] = a
-    pick = questionary.select("What next?", choices=titles).ask()
+    pick = questionary.select(
+        "What next?", choices=titles, instruction="Ctrl-C → back to menu"
+    ).ask()
     if pick is None:
         return
     chosen = by_title[pick]
@@ -186,7 +190,8 @@ def confirm_by_typing(label: str, *, expected: str) -> bool:
     if os.environ.get("PAIS_QUICK_CONFIRM"):
         return branch_yes_no(label, default=False)
     typed = questionary.text(
-        f"{label}\nType '{expected}' to confirm (anything else cancels):"
+        f"{label}\nType '{expected}' to confirm (anything else cancels):",
+        instruction="Ctrl-C → cancel",
     ).ask()
     return bool(typed == expected)
 

@@ -87,6 +87,11 @@ Destructive ops use **type-to-confirm** (you type the resource name to proceed).
 
 `pais shell` opens the menu explicitly. To opt out of the bare-`pais` trigger, pass `--no-interactive` or set `PAIS_NONINTERACTIVE=1`. Non-TTY callers (pipes, scripts, CI) always print the help banner, never the menu. Pick `📋  all commands…` from the landing screen for the full v0.5-style flat command list.
 
+**Navigation shortcuts**:
+- `Ctrl-C` / `Esc` → back to the previous step (or exit shell at the landing screen). Every prompt shows the hint inline.
+- `←  back` row in every picker — same effect as `Ctrl-C`, just clickable.
+- The shell defaults to **WARNING-level logs** so the menu stays readable. Pass `pais -v` (or `PAIS_VERBOSE=1`) for the full INFO stream when troubleshooting. The full log always still rotates to `~/.pais/logs/pais.log`.
+
 ## Persistent config
 
 Tired of `export PAIS_*` on every shell? Drop a TOML config file with named profiles:
