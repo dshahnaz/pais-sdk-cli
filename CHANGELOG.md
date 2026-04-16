@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.3 · fix: shell logs leaked back through `from_settings` re-configure
+
+Hotfix for v0.6.2. The shell's WARNING override was undone by every `Settings.build_client()` call inside the menu loop — `PaisClient.from_settings(settings)` re-runs `configure_logging(level=settings.log_level)`, and `settings.log_level` was still `"INFO"`. The fix: also mutate `settings.log_level = "WARNING"` (only in the shell, only when `PAIS_VERBOSE` is unset) so subsequent `from_settings` calls keep the WARNING floor.
+
+### Fixed
+- Interactive shell no longer leaks `pais.request` / `httpx` INFO lines on every menu refresh — the v0.6.2 quieting now actually sticks across `build_client()` re-configure cycles.
+
 ## 0.6.2 · quiet interactive shell + visible back navigation
 
 Purely additive — no breaking changes. Two quality-of-life fixes for the v0.6 interactive shell.
