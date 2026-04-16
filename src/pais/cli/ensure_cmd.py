@@ -10,6 +10,7 @@ import typer
 
 from pais.cli import _alias
 from pais.cli._config_file import load_profile_config
+from pais.cli._flags import DRY_RUN_OPT, OUTPUT_OPT, YES_OPT
 from pais.cli._output import exit_code_for, render
 from pais.cli._profile_config import IndexDeclaration, KnowledgeBaseDeclaration, ProfileConfig
 from pais.client import PaisClient
@@ -78,12 +79,12 @@ def _confirm_prune(item_label: str) -> bool:
 
 
 def kb_ensure(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print intended actions; no writes."),
+    dry_run: bool = DRY_RUN_OPT,
     prune: bool = typer.Option(
         False, "--prune", help="Also delete server-side KBs/indexes not in the TOML."
     ),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Required to enable --prune."),
-    output: str = typer.Option("table", "--output", "-o", help="table | json | yaml"),
+    yes: bool = YES_OPT,
+    output: str = OUTPUT_OPT,
 ) -> None:
     """Materialize the declarative knowledge_bases / indexes block from the active profile.
 

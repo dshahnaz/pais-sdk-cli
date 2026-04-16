@@ -11,9 +11,17 @@ import typer
 
 from pais.cli import _alias, _kb_show, config_cmd
 from pais.cli._config_file import load_profile_config
+from pais.cli._flags import (
+    EPOCH_OPT,
+    HELP_OPTION_NAMES,
+    OUTPUT_OPT,
+    WITH_COUNTS_OPT,
+    YES_OPT,
+)
 from pais.cli._output import exit_code_for, render
 from pais.cli.ensure_cmd import kb_ensure
 from pais.cli.ingest_cmd import alias_app, ingest_app, splitters_app
+from pais.cli.status_cmd import status as status_cmd
 from pais.client import PaisClient
 from pais.config import Settings, set_runtime_overrides
 from pais.errors import PaisError
@@ -28,13 +36,18 @@ from pais.models import (
     ToolLinkType,
 )
 
-app = typer.Typer(help="PAIS SDK + CLI — talk to VMware Private AI Service or a local mock.")
-kb_app = typer.Typer(help="Knowledge Base commands")
-index_app = typer.Typer(help="Index commands (nested under a KB)")
-agent_app = typer.Typer(help="Agent commands")
-mcp_app = typer.Typer(help="MCP tool discovery")
-models_app = typer.Typer(help="Model discovery")
-mock_app = typer.Typer(help="Run the local PAIS mock server")
+app = typer.Typer(
+    help="PAIS SDK + CLI — talk to VMware Private AI Service or a local mock.",
+    context_settings=HELP_OPTION_NAMES,
+)
+kb_app = typer.Typer(help="Knowledge Base commands", context_settings=HELP_OPTION_NAMES)
+index_app = typer.Typer(
+    help="Index commands (nested under a KB)", context_settings=HELP_OPTION_NAMES
+)
+agent_app = typer.Typer(help="Agent commands", context_settings=HELP_OPTION_NAMES)
+mcp_app = typer.Typer(help="MCP tool discovery", context_settings=HELP_OPTION_NAMES)
+models_app = typer.Typer(help="Model discovery", context_settings=HELP_OPTION_NAMES)
+mock_app = typer.Typer(help="Run the local PAIS mock server", context_settings=HELP_OPTION_NAMES)
 app.add_typer(kb_app, name="kb")
 app.add_typer(index_app, name="index")
 app.add_typer(agent_app, name="agent")
@@ -45,9 +58,7 @@ app.add_typer(config_cmd.app, name="config")
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(splitters_app, name="splitters")
 app.add_typer(alias_app, name="alias")
-
-_OutputOpt = typer.Option("table", "--output", "-o", help="table | json | yaml")
-_YesOpt = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt")
+app.command("status")(status_cmd)
 
 
 def _print_version_and_exit(value: bool) -> None:
@@ -64,7 +75,7 @@ def _root(
         None, "--config", help="Path to a TOML config file (overrides discovery)"
     ),
     profile: str | None = typer.Option(
-        None, "--profile", help="Profile name within the config file"
+        None, "--profile", "-p", help="Profile name within the config file"
     ),
     version: bool = typer.Option(
         False,
@@ -147,15 +158,9 @@ def _run(fn: Callable[[], None]) -> None:
 # --- KB -----------------------------------------------------------------------
 @kb_app.command("list")
 def kb_list(
-    with_counts: bool = typer.Option(
-        False,
-        "--with-counts",
-        help="Include indexes_count + documents_count (one extra round-trip per KB).",
-    ),
-    epoch: bool = typer.Option(
-        False, "--epoch", help="Print epoch timestamps instead of human dates."
-    ),
-    output: str = _OutputOpt,
+    with_counts: bool = WITH_COUNTS_OPT,
+    epoch: bool = EPOCH_OPT,
+    output: str = OUTPUT_OPT,
 ) -> None:
     def go() -> None:
         with _client() as c:
@@ -187,7 +192,7 @@ def kb_list(
 def kb_create(
     name: str = typer.Option(...),
     description: str | None = typer.Option(None),
-    output: str = _OutputOpt,
+    output: str = OUTPUT_OPT,
 ) -> None:
     def go() -> None:
         with _client() as c:
@@ -203,10 +208,8 @@ kb_app.command("ensure")(kb_ensure)
 @kb_app.command("show")
 def kb_show(
     kb_ref: str = typer.Argument(..., help="KB alias (from your config) or UUID."),
-    epoch: bool = typer.Option(
-        False, "--epoch", help="Print epoch timestamps instead of human dates."
-    ),
-    output: str = typer.Option("table", "--output", "-o", help="table | json | yaml"),
+    epoch: bool = EPOCH_OPT,
+    output: str = OUTPUT_OPT,
 ) -> None:
     """KB header + per-index breakdown."""
 
@@ -226,7 +229,7 @@ def kb_show(
 
 
 @kb_app.command("get")
-def kb_get(kb_ref: str, output: str = _OutputOpt) -> None:
+def kb_get(kb_ref: str, output: str = OUTPUT_OPT) -> None:
     def go() -> None:
         with _client() as c:
             kb_uuid = _resolve_kb(c, kb_ref)
@@ -236,7 +239,7 @@ def kb_get(kb_ref: str, output: str = _OutputOpt) -> None:
 
 
 @kb_app.command("delete")
-def kb_delete(kb_ref: str, yes: bool = _YesOpt) -> None:
+def kb_delete(kb_ref: str, yes: bool = YES_OPT) -> None:
     """Delete a KB (cascades indexes + documents)."""
     _confirm(f"delete KB {kb_ref} and all its indexes/documents?", yes=yes)
 
@@ -252,9 +255,9 @@ def kb_delete(kb_ref: str, yes: bool = _YesOpt) -> None:
 @kb_app.command("purge")
 def kb_purge(
     kb_id: str,
-    yes: bool = _YesOpt,
+    yes: bool = YES_OPT,
     strategy: str = typer.Option("auto", "--strategy", help="auto | api | recreate"),
-    output: str = _OutputOpt,
+    output: str = OUTPUT_OPT,
 ) -> None:
     """Delete every document in every index under the KB. KB itself stays."""
     _confirm(f"purge all documents under KB {kb_id}?", yes=yes)
@@ -280,8 +283,8 @@ def kb_purge(
 @index_app.command("list")
 def index_list(
     kb_ref: str,
-    epoch: bool = typer.Option(False, "--epoch"),
-    output: str = _OutputOpt,
+    epoch: bool = EPOCH_OPT,
+    output: str = OUTPUT_OPT,
 ) -> None:
     def go() -> None:
         with _client() as c:
@@ -325,7 +328,7 @@ def index_create(
     embeddings_model: str = typer.Option(..., "--embeddings-model"),
     chunk_size: int = 400,
     chunk_overlap: int = 100,
-    output: str = _OutputOpt,
+    output: str = OUTPUT_OPT,
 ) -> None:
     def go() -> None:
         with _client() as c:
@@ -345,7 +348,7 @@ def index_create(
 
 
 @index_app.command("upload")
-def index_upload(kb_ref: str, index_ref: str, file: str, output: str = _OutputOpt) -> None:
+def index_upload(kb_ref: str, index_ref: str, file: str, output: str = OUTPUT_OPT) -> None:
     def go() -> None:
         with _client() as c:
             kb_uuid, idx_uuid = _resolve_index(c, kb_ref, index_ref)
@@ -362,7 +365,7 @@ def index_search(
     query: str,
     top_n: int = 5,
     similarity_cutoff: float = 0.0,
-    output: str = _OutputOpt,
+    output: str = OUTPUT_OPT,
 ) -> None:
     def go() -> None:
         with _client() as c:
@@ -383,7 +386,7 @@ def index_search(
 
 @index_app.command("wait")
 def index_wait(
-    kb_ref: str, index_ref: str, timeout: float = 300.0, output: str = _OutputOpt
+    kb_ref: str, index_ref: str, timeout: float = 300.0, output: str = OUTPUT_OPT
 ) -> None:
     def go() -> None:
         with _client() as c:
@@ -395,7 +398,7 @@ def index_wait(
 
 
 @index_app.command("delete")
-def index_delete(kb_ref: str, index_ref: str, yes: bool = _YesOpt) -> None:
+def index_delete(kb_ref: str, index_ref: str, yes: bool = YES_OPT) -> None:
     """Delete an index entirely (cascades documents)."""
     _confirm(f"delete index {index_ref} under KB {kb_ref}?", yes=yes)
 
@@ -412,9 +415,9 @@ def index_delete(kb_ref: str, index_ref: str, yes: bool = _YesOpt) -> None:
 def index_purge(
     kb_ref: str,
     index_ref: str,
-    yes: bool = _YesOpt,
+    yes: bool = YES_OPT,
     strategy: str = typer.Option("auto", "--strategy", help="auto | api | recreate"),
-    output: str = _OutputOpt,
+    output: str = OUTPUT_OPT,
 ) -> None:
     """Delete all documents in an index. Index itself stays (or is recreated)."""
     _confirm(f"purge all documents in index {index_ref}?", yes=yes)
@@ -438,9 +441,9 @@ def index_purge(
 def index_cancel(
     kb_ref: str,
     index_ref: str,
-    yes: bool = _YesOpt,
+    yes: bool = YES_OPT,
     strategy: str = typer.Option("auto", "--strategy", help="auto | api | recreate"),
-    output: str = _OutputOpt,
+    output: str = OUTPUT_OPT,
 ) -> None:
     """Cancel an in-progress indexing job."""
     _confirm(f"cancel indexing for index {index_ref}?", yes=yes)
@@ -461,7 +464,7 @@ def index_cancel(
 
 # --- Agent --------------------------------------------------------------------
 @agent_app.command("list")
-def agent_list(output: str = _OutputOpt) -> None:
+def agent_list(output: str = OUTPUT_OPT) -> None:
     def go() -> None:
         with _client() as c:
             render(
@@ -483,7 +486,7 @@ def agent_create(
     ),
     top_n: int = 5,
     similarity_cutoff: float = 0.0,
-    output: str = _OutputOpt,
+    output: str = OUTPUT_OPT,
 ) -> None:
     def go() -> None:
         with _client() as c:
@@ -506,7 +509,7 @@ def agent_create(
 
 
 @agent_app.command("chat")
-def agent_chat(agent_id: str, message: str, output: str = _OutputOpt) -> None:
+def agent_chat(agent_id: str, message: str, output: str = OUTPUT_OPT) -> None:
     def go() -> None:
         with _client() as c:
             resp = c.agents.chat(
@@ -533,7 +536,7 @@ def agent_delete(agent_id: str) -> None:
 
 # --- MCP + models -------------------------------------------------------------
 @mcp_app.command("tools")
-def mcp_tools(server: str = "built-in", output: str = _OutputOpt) -> None:
+def mcp_tools(server: str = "built-in", output: str = OUTPUT_OPT) -> None:
     def go() -> None:
         with _client() as c:
             tools = c.mcp_tools.list(server=server).data
@@ -543,7 +546,7 @@ def mcp_tools(server: str = "built-in", output: str = _OutputOpt) -> None:
 
 
 @models_app.command("list")
-def models_list(output: str = _OutputOpt) -> None:
+def models_list(output: str = OUTPUT_OPT) -> None:
     def go() -> None:
         with _client() as c:
             render(

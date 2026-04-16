@@ -15,12 +15,13 @@ from pais.cli._config_file import (
     discover_config_path,
     load_profile,
 )
+from pais.cli._flags import FORCE_OPT, HELP_OPTION_NAMES, OUTPUT_OPT, PROFILE_OPT
 from pais.cli._output import render
 from pais.config import Settings
 
-app = typer.Typer(help="Inspect and scaffold the PAIS config file.")
-
-_OutputOpt = typer.Option("table", "--output", "-o", help="table | json | yaml")
+app = typer.Typer(
+    help="Inspect and scaffold the PAIS config file.", context_settings=HELP_OPTION_NAMES
+)
 
 
 @app.command("init")
@@ -28,7 +29,7 @@ def init(
     project: bool = typer.Option(
         False, "--project", help=f"Create ./{PROJECT_FILENAME} instead of ~/.pais/config.toml"
     ),
-    force: bool = typer.Option(False, "--force", help="Overwrite if the file already exists"),
+    force: bool = FORCE_OPT,
 ) -> None:
     """Scaffold a config file with sensible comments."""
     target = Path.cwd() / PROJECT_FILENAME if project else GLOBAL_PATH
@@ -42,9 +43,9 @@ def init(
 
 @app.command("show")
 def show(
-    profile: str | None = typer.Option(None, "--profile"),
+    profile: str | None = PROFILE_OPT,
     config: Path | None = typer.Option(None, "--config"),
-    output: str = _OutputOpt,
+    output: str = OUTPUT_OPT,
 ) -> None:
     """Print effective Settings (secrets redacted)."""
     from pais.config import set_runtime_overrides
@@ -67,8 +68,8 @@ def show(
 @app.command("path")
 def path_cmd(
     config: Path | None = typer.Option(None, "--config"),
-    profile: str | None = typer.Option(None, "--profile"),
-    output: str = _OutputOpt,
+    profile: str | None = PROFILE_OPT,
+    output: str = OUTPUT_OPT,
 ) -> None:
     """Show which config file (if any) and which profile resolve right now."""
     p = discover_config_path(config)
