@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
+from dataclasses import asdict
+from pathlib import Path
 
 import typer
 
+from pais.cli import config_cmd
 from pais.cli._output import exit_code_for, render
 from pais.client import PaisClient
-from pais.config import Settings
+from pais.config import Settings, set_runtime_overrides
 from pais.errors import PaisError
 from pais.models import (
     AgentCreate,
@@ -34,12 +38,38 @@ app.add_typer(agent_app, name="agent")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(models_app, name="models")
 app.add_typer(mock_app, name="mock")
+app.add_typer(config_cmd.app, name="config")
 
 _OutputOpt = typer.Option("table", "--output", "-o", help="table | json | yaml")
+_YesOpt = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt")
+
+
+@app.callback()
+def _root(
+    config: Path | None = typer.Option(
+        None, "--config", help="Path to a TOML config file (overrides discovery)"
+    ),
+    profile: str | None = typer.Option(
+        None, "--profile", help="Profile name within the config file"
+    ),
+) -> None:
+    """Pin --config / --profile so every subcommand's Settings() picks them up."""
+    set_runtime_overrides(config_path=config, profile=profile)
 
 
 def _client() -> PaisClient:
     return Settings().build_client()
+
+
+def _confirm(message: str, *, yes: bool) -> None:
+    if yes:
+        return
+    if not sys.stdin.isatty():
+        typer.echo(f"refusing destructive op without --yes (non-interactive): {message}", err=True)
+        raise typer.Exit(code=1)
+    if not typer.confirm(message, default=False):
+        typer.echo("aborted")
+        raise typer.Exit(code=1)
 
 
 def _run(fn: Callable[[], None]) -> None:
@@ -94,11 +124,40 @@ def kb_get(kb_id: str, output: str = _OutputOpt) -> None:
 
 
 @kb_app.command("delete")
-def kb_delete(kb_id: str) -> None:
+def kb_delete(kb_id: str, yes: bool = _YesOpt) -> None:
+    """Delete a KB (cascades indexes + documents)."""
+    _confirm(f"delete KB {kb_id} and all its indexes/documents?", yes=yes)
+
     def go() -> None:
         with _client() as c:
             c.knowledge_bases.delete(kb_id)
             typer.echo(f"deleted {kb_id}")
+
+    _run(go)
+
+
+@kb_app.command("purge")
+def kb_purge(
+    kb_id: str,
+    yes: bool = _YesOpt,
+    strategy: str = typer.Option("auto", "--strategy", help="auto | api | recreate"),
+    output: str = _OutputOpt,
+) -> None:
+    """Delete every document in every index under the KB. KB itself stays."""
+    _confirm(f"purge all documents under KB {kb_id}?", yes=yes)
+
+    def go() -> None:
+        with _client() as c:
+            res = c.knowledge_bases.purge(kb_id, strategy=strategy)  # type: ignore[arg-type]
+            render(
+                {
+                    "indexes_processed": res.indexes_processed,
+                    "documents_deleted": res.documents_deleted,
+                    "errors": res.errors,
+                    "per_index": [asdict(p) for p in res.per_index],
+                },
+                fmt=output,
+            )
 
     _run(go)
 
@@ -183,6 +242,68 @@ def index_wait(kb_id: str, index_id: str, timeout: float = 300.0, output: str = 
         with _client() as c:
             indexing = c.indexes.wait_for_indexing(kb_id, index_id, timeout=timeout, interval=1.0)
             render(indexing, fmt=output)
+
+    _run(go)
+
+
+@index_app.command("delete")
+def index_delete(kb_id: str, index_id: str, yes: bool = _YesOpt) -> None:
+    """Delete an index entirely (cascades documents)."""
+    _confirm(f"delete index {index_id} under KB {kb_id}?", yes=yes)
+
+    def go() -> None:
+        with _client() as c:
+            c.indexes.delete(kb_id, index_id)
+            typer.echo(f"deleted {index_id}")
+
+    _run(go)
+
+
+@index_app.command("purge")
+def index_purge(
+    kb_id: str,
+    index_id: str,
+    yes: bool = _YesOpt,
+    strategy: str = typer.Option("auto", "--strategy", help="auto | api | recreate"),
+    output: str = _OutputOpt,
+) -> None:
+    """Delete all documents in an index. Index itself stays (or is recreated)."""
+    _confirm(f"purge all documents in index {index_id}?", yes=yes)
+
+    def go() -> None:
+        with _client() as c:
+            res = c.indexes.purge(kb_id, index_id, strategy=strategy)  # type: ignore[arg-type]
+            render(asdict(res), fmt=output)
+            if res.new_index_id:
+                typer.echo(
+                    f"NOTE: index was recreated; new index_id={res.new_index_id} "
+                    f"(update any agents referencing the old id)",
+                    err=True,
+                )
+
+    _run(go)
+
+
+@index_app.command("cancel")
+def index_cancel(
+    kb_id: str,
+    index_id: str,
+    yes: bool = _YesOpt,
+    strategy: str = typer.Option("auto", "--strategy", help="auto | api | recreate"),
+    output: str = _OutputOpt,
+) -> None:
+    """Cancel an in-progress indexing job."""
+    _confirm(f"cancel indexing for index {index_id}?", yes=yes)
+
+    def go() -> None:
+        with _client() as c:
+            res = c.indexes.cancel_indexing(kb_id, index_id, strategy=strategy)  # type: ignore[arg-type]
+            render(asdict(res), fmt=output)
+            if res.new_index_id:
+                typer.echo(
+                    f"NOTE: index was recreated; new index_id={res.new_index_id}",
+                    err=True,
+                )
 
     _run(go)
 

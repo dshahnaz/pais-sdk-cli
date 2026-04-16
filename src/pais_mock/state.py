@@ -190,6 +190,11 @@ class Store:
         self._agent_ids = itertools.count(1)
         # Per-index tool binding: index_id -> mcp_tool id (for KB search)
         self._index_tool_binding: dict[str, str] = {}
+        # Test hook: paths in this set return 404 from `_route` so callers can
+        # exercise the probe-then-fallback paths in cleanup/cancel ops.
+        # Each entry is a tuple of (METHOD, path-suffix). The suffix matches by
+        # `endswith` so callers don't have to know the exact kb/index ids.
+        self.disabled_endpoints: set[tuple[str, str]] = set()
 
     # --- MockBackend protocol -------------------------------------------------
     def dispatch(
@@ -383,26 +388,50 @@ class Store:
                 raise _HttpError(405, {"detail": "indexings requires POST"})
             return self._trigger_indexing(ix)
         if sub == "active-indexing":
-            if method != "GET":
-                raise _HttpError(405, {"detail": "active-indexing is GET-only"})
-            if ix.active_indexing is None:
-                raise _HttpError(404, {"detail": "no active indexing"})
-            return ix.active_indexing.to_json()
-        if sub == "documents":
             if method == "GET":
-                return {
-                    "object": "list",
-                    "data": [d.to_json() for d in ix.documents.values()],
-                    "has_more": False,
-                }
-            if method == "POST":
-                return self._upload_document(ix, files)
-            raise _HttpError(405, {"detail": f"method not allowed: {method}"})
+                if ix.active_indexing is None:
+                    raise _HttpError(404, {"detail": "no active indexing"})
+                return ix.active_indexing.to_json()
+            if method == "DELETE":
+                self._check_disabled(method, "/active-indexing")
+                if ix.active_indexing is None:
+                    raise _HttpError(404, {"detail": "no active indexing"})
+                ix.active_indexing.state = "CANCELLED"
+                cancelled = ix.active_indexing
+                ix.active_indexing = None
+                return cancelled.to_json()
+            raise _HttpError(405, {"detail": f"active-indexing method not allowed: {method}"})
+        if sub == "documents":
+            # /documents OR /documents/{document_id}
+            if len(parts) == 2:
+                if method == "GET":
+                    return {
+                        "object": "list",
+                        "data": [d.to_json() for d in ix.documents.values()],
+                        "has_more": False,
+                        "num_objects": len(ix.documents),
+                    }
+                if method == "POST":
+                    return self._upload_document(ix, files)
+                raise _HttpError(405, {"detail": f"method not allowed: {method}"})
+            doc_id = parts[2]
+            if method == "DELETE":
+                self._check_disabled(method, "/documents/{id}")
+                if doc_id not in ix.documents:
+                    raise _HttpError(404, {"detail": f"document not found: {doc_id}"})
+                del ix.documents[doc_id]
+                return {"deleted": True, "id": doc_id}
+            raise _HttpError(405, {"detail": f"document {doc_id}: method not allowed: {method}"})
         if sub == "search":
             if method != "POST":
                 raise _HttpError(405, {"detail": "search requires POST"})
             return self._search(ix, json or {})
         raise _HttpError(404, {"detail": f"unknown index sub-route: {sub}"})
+
+    def _check_disabled(self, method: str, suffix: str) -> None:
+        """Test hook: simulate a PAIS deployment that doesn't expose an endpoint."""
+        if (method, suffix) in self.disabled_endpoints:
+            raise _HttpError(405, {"detail": f"endpoint disabled in mock: {method} {suffix}"})
 
     def _create_index(self, kb: _KBRecord, payload: dict[str, Any]) -> dict[str, Any]:
         if not payload.get("name") or not payload.get("embeddings_model_endpoint"):

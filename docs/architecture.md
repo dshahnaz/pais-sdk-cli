@@ -9,6 +9,13 @@ One-page map of where things live in this repo.
 │  CLI                                                      │
 │  pais       → src/pais/cli/app.py   (kb, index, agent,…)  │
 │  pais-dev   → src/pais/cli/dev.py   (split-suite, ingest) │
+│  pais config→ src/pais/cli/config_cmd.py                  │
+└────────────────────────┬──────────────────────────────────┘
+                         │
+┌────────────────────────▼──────────────────────────────────┐
+│  Config loader                                            │
+│  src/pais/cli/_config_file.py  (TOML profiles)            │
+│  src/pais/config.py            (Settings + precedence)    │
 └────────────────────────┬──────────────────────────────────┘
                          │
 ┌────────────────────────▼──────────────────────────────────┐

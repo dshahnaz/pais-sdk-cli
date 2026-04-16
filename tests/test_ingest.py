@@ -133,6 +133,39 @@ def test_retrieval_returns_breadcrumb_text(tmp_path: Path) -> None:
     client.close()
 
 
+def test_ingest_directory_with_replace_flag(tmp_path: Path) -> None:
+    """--replace deletes only matching prior docs, leaves other suites alone."""
+    client = PaisClient(FakeTransport(Store()))
+    kb_id, ix_id = _provision(client)
+
+    # First ingest: two suites.
+    suites = tmp_path / "suites"
+    suites.mkdir()
+    (suites / "Alpha.md").write_text(_SUITE_MD.format(name="Alpha-Suite", topic="alpha"))
+    (suites / "Beta.md").write_text(_SUITE_MD.format(name="Beta-Suite", topic="beta"))
+    ingest_directory(client, suites, kb_id=kb_id, index_id=ix_id, workers=2)
+    initial = {d.origin_name for d in client.indexes.list_documents(kb_id, ix_id).data}
+    assert any("Alpha-Suite__" in n for n in initial)
+    assert any("Beta-Suite__" in n for n in initial)
+
+    # Now re-ingest Alpha only with --replace; Beta docs must remain untouched.
+    only_alpha = tmp_path / "alpha-only"
+    only_alpha.mkdir()
+    (only_alpha / "Alpha.md").write_text(_SUITE_MD.format(name="Alpha-Suite", topic="alpha"))
+    ingest_directory(client, only_alpha, kb_id=kb_id, index_id=ix_id, workers=1, replace=True)
+
+    after = {d.origin_name for d in client.indexes.list_documents(kb_id, ix_id).data}
+    # Alpha sections still present (re-uploaded; same names).
+    assert any("Alpha-Suite__" in n for n in after)
+    # Beta sections untouched.
+    assert {n for n in after if "Beta-Suite__" in n} == {n for n in initial if "Beta-Suite__" in n}
+    # No duplicates of Alpha (would be 2x original count).
+    alpha_count = sum(1 for n in after if "Alpha-Suite__" in n)
+    initial_alpha_count = sum(1 for n in initial if "Alpha-Suite__" in n)
+    assert alpha_count == initial_alpha_count
+    client.close()
+
+
 def test_error_per_suite_does_not_stop_run(tmp_path: Path, monkeypatch) -> None:
     """If one suite's file is malformed, others still ingest and the run completes."""
     client = PaisClient(FakeTransport(Store()))

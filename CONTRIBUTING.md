@@ -47,6 +47,13 @@ uv run pais kb list
 - `pais` — user-facing: `kb`, `index`, `agent`, `mcp`, `models`, `mock serve`
 - `pais-dev` — dev-facing: `split-suite`, `ingest-suite`, `ingest-suites`
 
+## Testing destructive commands
+
+`pais kb delete / purge`, `pais index delete / purge / cancel`, and friends prompt for confirmation when stdin is a TTY and refuse to run in non-TTY without `--yes`. To exercise them in tests:
+
+- For unit tests of the **SDK** layer (`tests/test_cleanup.py`, `tests/test_cancel_indexing.py`), call the SDK methods directly — no CLI involved, no prompt to deal with.
+- For **CLI** tests, pass `--yes` to skip the prompt; the non-TTY refusal is itself a test (`test_cli.py::test_kb_delete_requires_yes_in_non_tty`). To exercise the prompt path, use `runner.invoke(app, [...], input="y\n")` plus a `monkeypatch.setattr(sys.stdin, "isatty", lambda: True)`.
+
 ## Tokenizer dependency
 
 `pais-dev` uses `tokenizers` (HuggingFace) to measure chunks against PAIS's 512-token limit with the exact same tokenizer the server uses (`BAAI/bge-small-en-v1.5`). It lives under the `[dev]` optional-dependencies group, so installing with `uv sync --all-extras` is required to run `pais-dev` or the tests that touch `pais.dev.*`. First run downloads ~10 MB vocab into `~/.cache/huggingface/`; subsequent runs are offline.

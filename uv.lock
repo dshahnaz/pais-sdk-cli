@@ -769,6 +769,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "rich" },
     { name = "structlog" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typer" },
     { name = "uvicorn" },
 ]
@@ -783,6 +784,7 @@ dev = [
     { name = "pyyaml" },
     { name = "ruff" },
     { name = "tokenizers" },
+    { name = "tomli" },
     { name = "types-pyyaml" },
     { name = "types-requests" },
 ]
@@ -808,6 +810,8 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "tokenizers", marker = "extra == 'dev'", specifier = ">=0.15" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
+    { name = "tomli", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "typer", specifier = ">=0.12" },
     { name = "types-pyyaml", marker = "extra == 'dev'" },
     { name = "types-requests", marker = "extra == 'dev'" },

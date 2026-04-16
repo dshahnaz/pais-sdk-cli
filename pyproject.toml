@@ -25,6 +25,7 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "python-multipart>=0.0.9",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +41,7 @@ dev = [
     "pyyaml>=6.0",
     "types-pyyaml",
     "tokenizers>=0.15",
+    "tomli>=2.0",
 ]
 
 [project.scripts]
@@ -68,6 +70,10 @@ ignore = ["E501", "UP042"]
 # RUF012 mutable default on pydantic model fields — these are treated as
 # Field(default_factory=...) at class construction and don't share state.
 "src/pais/models/*.py" = ["RUF012"]
+# B008: Typer requires `typer.Option(...)` and `typer.Argument(...)` as defaults
+# — that's how it sees them. Hoisting to module-level constants is sometimes
+# too rigid (e.g. when the option needs runtime-computed paths).
+"src/pais/cli/*.py" = ["B008"]
 
 [tool.ruff.format]
 quote-style = "double"

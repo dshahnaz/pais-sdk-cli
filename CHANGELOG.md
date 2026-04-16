@@ -1,6 +1,27 @@
 # Changelog
 
-## [Unreleased] — 0.2.0 · test-suite ingestion pipeline
+## [Unreleased] — 0.3.0 · config file, cleanup ops, cancel-indexing
+
+### Added
+- **Persistent config file** (`~/.pais/config.toml` or `./pais.toml` — project wins) with `[profiles.<name>]` tables. Loaded by `Settings` so every command picks it up. New `pais config init / show / path` commands. New `--config` and `--profile` global CLI flags.
+- **Cleanup commands** with `--strategy {auto, api, recreate}` and `--yes` confirmation gating:
+  - `pais kb delete <kb> --yes` (existing command, gained confirmation prompt)
+  - `pais kb purge <kb>` — delete docs in every index, keep KB
+  - `pais index purge <kb> <index>` — delete docs in one index
+  - `pais index delete <kb> <index>` — delete the index entirely
+  - `pais index cancel <kb> <index>` — stop a running indexing job
+- **`pais-dev ingest-suites --replace`** — only re-uploads suites whose origin_name slug matches the input directory; untouched suites stay.
+- SDK: `IndexesResource.{delete_document, purge, cancel_indexing}`, `KnowledgeBasesResource.purge`, `dev.ingest.ingest_directory(..., replace=True)`.
+- Mock backend: `DELETE /documents/{id}`, `DELETE /active-indexing`, `Store.disabled_endpoints` test hook for exercising probe-then-fallback paths.
+
+### Changed
+- `Settings` precedence is now: CLI kwargs → `PAIS_*` env → config-file profile → `.env` → defaults.
+- Confirmation prompts on destructive ops; refuse to run in non-TTY without `--yes`.
+
+### Verified PAIS API constraints (drove the design)
+- No documented cancel/stop indexing endpoint; no documented per-document DELETE; no batch DELETE. All cleanup ops therefore use a probe-then-fallback pattern (try the obvious REST verb; on 404/405 fall back to delete-and-recreate the index — which changes its `id`, surfaced in CLI output and structured logs).
+
+## 0.2.0 · test-suite ingestion pipeline
 
 ### Added
 - `pais-dev` CLI (`pais.cli.dev`) with `split-suite`, `ingest-suite`, `ingest-suites` commands.

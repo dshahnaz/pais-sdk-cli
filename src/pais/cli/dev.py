@@ -99,6 +99,14 @@ def ingest_suites_cmd(
     kb: str = typer.Option(..., "--kb"),
     index: str = typer.Option(..., "--index"),
     workers: int = typer.Option(4, "--workers", min=1, max=32),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help=(
+            "Before uploading each suite, delete existing docs in the index whose "
+            "origin_name starts with the suite slug (other suites are untouched)."
+        ),
+    ),
     report_path: Path = _ReportOpt,
     output: str = _OutputOpt,
 ) -> None:
@@ -123,7 +131,13 @@ def ingest_suites_cmd(
                 progress.advance(task)
 
             report = ingest_directory(
-                c, root, kb_id=kb, index_id=index, workers=workers, progress=on_file
+                c,
+                root,
+                kb_id=kb,
+                index_id=index,
+                workers=workers,
+                progress=on_file,
+                replace=replace,
             )
         write_report(report, report_path)
         _print_summary(report, report_path, output=output)

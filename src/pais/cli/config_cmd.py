@@ -1,0 +1,76 @@
+"""`pais config` subcommand: init/show/path."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import typer
+
+from pais.cli._config_file import (
+    GLOBAL_PATH,
+    PROJECT_FILENAME,
+    SCAFFOLD_GLOBAL,
+    SCAFFOLD_PROJECT,
+    discover_config_path,
+    load_profile,
+)
+from pais.cli._output import render
+from pais.config import Settings
+
+app = typer.Typer(help="Inspect and scaffold the PAIS config file.")
+
+_OutputOpt = typer.Option("table", "--output", "-o", help="table | json | yaml")
+
+
+@app.command("init")
+def init(
+    project: bool = typer.Option(
+        False, "--project", help=f"Create ./{PROJECT_FILENAME} instead of ~/.pais/config.toml"
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite if the file already exists"),
+) -> None:
+    """Scaffold a config file with sensible comments."""
+    target = Path.cwd() / PROJECT_FILENAME if project else GLOBAL_PATH
+    if target.exists() and not force:
+        typer.echo(f"refusing to overwrite {target} (use --force)", err=True)
+        raise typer.Exit(code=1)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(SCAFFOLD_PROJECT if project else SCAFFOLD_GLOBAL)
+    typer.echo(f"wrote {target}")
+
+
+@app.command("show")
+def show(
+    profile: str | None = typer.Option(None, "--profile"),
+    config: Path | None = typer.Option(None, "--config"),
+    output: str = _OutputOpt,
+) -> None:
+    """Print effective Settings (secrets redacted)."""
+    from pais.config import set_runtime_overrides
+
+    set_runtime_overrides(config_path=config, profile=profile)
+    s = Settings()
+    data = s.model_dump(mode="json")
+    for secret in ("password", "client_secret", "bearer_token"):
+        if data.get(secret):
+            data[secret] = "***"
+    render(data, fmt=output)
+
+
+@app.command("path")
+def path_cmd(
+    config: Path | None = typer.Option(None, "--config"),
+    profile: str | None = typer.Option(None, "--profile"),
+    output: str = _OutputOpt,
+) -> None:
+    """Show which config file (if any) and which profile resolve right now."""
+    p = discover_config_path(config)
+    _data, used_path, used_profile = load_profile(path=config, profile=profile)
+    render(
+        {
+            "config_file": str(used_path) if used_path else None,
+            "discovered_path": str(p) if p else None,
+            "profile": used_profile,
+        },
+        fmt=output,
+    )
