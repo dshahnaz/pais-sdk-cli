@@ -99,3 +99,81 @@ def test_quick_confirm_env_var_falls_back_to_yn(
     )
     cleanup_wf.run(client, Settings(), Console())
     assert all(k.name != "kb_q" for k in client.knowledge_bases.list().data)
+
+
+def test_kb_cleanup_typo_shows_visible_red_message(
+    fq: _FakeQ, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """v0.6.4: typo on confirm-by-typing must NOT be a dim aborted line."""
+    store = Store()
+    client = PaisClient(FakeTransport(store))
+    kb = client.knowledge_bases.create(KnowledgeBaseCreate(name="precious_kb"))
+    fq.script(
+        "KB (cascades indexes + docs)",
+        f"—  precious_kb  ({kb.id})",
+        "typo",
+    )
+    # Pipe Rich's output to a force_terminal=False console so the captured
+    # text is plain ASCII; we only check the visible content (not ANSI).
+    cleanup_wf.run(client, Settings(), Console(force_terminal=False, no_color=True))
+    captured = capsys.readouterr().out
+    # Visible message, not the old [dim]aborted[/dim].
+    assert "didn't match" in captured
+    # KB still there.
+    assert any(k.name == "precious_kb" for k in client.knowledge_bases.list().data)
+
+
+def test_kb_cleanup_verifies_deletion_after_call(
+    fq: _FakeQ, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """v0.6.4: green ✓ banner only when re-fetch confirms the resource is gone."""
+    store = Store()
+    client = PaisClient(FakeTransport(store))
+    kb = client.knowledge_bases.create(KnowledgeBaseCreate(name="real_kb"))
+    fq.script(
+        "KB (cascades indexes + docs)",
+        f"—  real_kb  ({kb.id})",
+        "real_kb",
+    )
+    cleanup_wf.run(client, Settings(), Console(force_terminal=False, no_color=True))
+    out = capsys.readouterr().out
+    # Verified-gone path → green ✓ banner
+    assert "real_kb" in out
+    assert "✓" in out  # not the red ✗
+    assert "still lists it" not in out
+
+
+def test_index_cleanup_unsupported_offers_alternatives(
+    fq: _FakeQ, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v0.6.4: when the SDK raises IndexDeleteUnsupported, workflow shows the
+    alternatives picker (no green ✓)."""
+    from pais.errors import IndexDeleteUnsupported
+    from pais.models import IndexCreate
+
+    store = Store()
+    client = PaisClient(FakeTransport(store))
+    kb = client.knowledge_bases.create(KnowledgeBaseCreate(name="kb_x"))
+    ix = client.indexes.create(
+        kb.id, IndexCreate(name="ix_x", embeddings_model_endpoint="BAAI/bge-small-en-v1.5")
+    )
+
+    # Force indexes.delete to raise IndexDeleteUnsupported.
+    def _boom(*_a: Any, **_k: Any) -> None:
+        raise IndexDeleteUnsupported()
+
+    monkeypatch.setattr(client.indexes, "delete", _boom)
+
+    fq.script(
+        "Index (cascades docs)",
+        f"—  kb_x  ({kb.id})",  # KB picker
+        f"—  ix_x  (status=AVAILABLE, docs=—, id={ix.id})",  # index picker
+        "ix_x",  # type-to-confirm
+        "← back",  # alternatives picker → cancel
+    )
+    cleanup_wf.run(client, Settings(), Console(force_terminal=False, no_color=True))
+    out = capsys.readouterr().out
+    # Red banner instead of green ✓
+    assert "Index DELETE not supported" in out or "not supported" in out
+    # Index still there.
+    assert any(i.name == "ix_x" for i in client.indexes.list(kb.id).data)

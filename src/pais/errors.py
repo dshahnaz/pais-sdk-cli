@@ -80,6 +80,34 @@ class PaisTimeoutError(PaisError):
     """Transport-level timeout."""
 
 
+class IndexDeleteUnsupported(PaisError):
+    """The PAIS deployment doesn't expose `DELETE /knowledge-bases/{kb}/indexes/{idx}`.
+
+    Per the published Broadcom API doc, per-index DELETE is not specified — some
+    deployments expose it, others 404/405. Callers should offer alternatives:
+    - delete the parent KB (cascades indexes + documents), OR
+    - use `pais index purge --strategy recreate` (drops + recreates the index;
+      changes the index_id).
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "PAIS doesn't expose per-index DELETE. To remove this index, delete "
+            "the parent KB (cascades), or use `pais index purge --strategy recreate`."
+        ),
+        *,
+        suggested_alternatives: list[str] | None = None,
+        status_code: int | None = None,
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(message, status_code=status_code, request_id=request_id)
+        self.suggested_alternatives = suggested_alternatives or [
+            "Delete the parent KB (cascades all indexes + documents)",
+            "Purge contents (--strategy recreate; changes the index_id)",
+        ]
+
+
 _STATUS_MAP: dict[int, type[PaisError]] = {
     400: PaisValidationError,
     401: PaisAuthError,

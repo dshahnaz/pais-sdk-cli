@@ -3,6 +3,7 @@
 from pais.client import PaisClient
 from pais.config import Settings
 from pais.errors import (
+    IndexDeleteUnsupported,
     PaisAuthError,
     PaisError,
     PaisNotFoundError,
@@ -13,6 +14,7 @@ from pais.errors import (
 )
 
 __all__ = [
+    "IndexDeleteUnsupported",
     "PaisAuthError",
     "PaisClient",
     "PaisError",
@@ -24,4 +26,4 @@ __all__ = [
     "Settings",
 ]
 
-__version__ = "0.6.3"
+__version__ = "0.6.4"

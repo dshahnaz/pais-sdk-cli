@@ -57,13 +57,38 @@ def branch_yes_no(question: str, *, default: bool = False) -> bool:
 
 
 def done_banner(console: Console, title: str, summary: dict[str, Any]) -> None:
-    """Render a green ✓ panel with the resource details."""
+    """Render a green ✓ panel — use ONLY when the operation verifiably succeeded."""
     body_lines = [f"[bold]{k}[/bold]  {v}" for k, v in summary.items()]
     console.print(
         Panel.fit(
             "\n".join(body_lines),
             title=f"[green]✓ {title}[/green]",
             border_style="green",
+        )
+    )
+
+
+def error_banner(console: Console, title: str, summary: dict[str, Any]) -> None:
+    """Render a red ✗ panel — use when the operation failed (verified)."""
+    body_lines = [f"[bold]{k}[/bold]  {v}" for k, v in summary.items()]
+    console.print(
+        Panel.fit(
+            "\n".join(body_lines),
+            title=f"[red]✗ {title}[/red]",
+            border_style="red",
+        )
+    )
+
+
+def partial_banner(console: Console, title: str, summary: dict[str, Any]) -> None:
+    """Render a yellow ⚠ panel — use when the operation partially succeeded
+    or completed with warnings (e.g. couldn't verify state after the call)."""
+    body_lines = [f"[bold]{k}[/bold]  {v}" for k, v in summary.items()]
+    console.print(
+        Panel.fit(
+            "\n".join(body_lines),
+            title=f"[yellow]⚠ {title}[/yellow]",
+            border_style="yellow",
         )
     )
 

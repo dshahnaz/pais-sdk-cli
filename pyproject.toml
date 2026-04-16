@@ -1,6 +1,6 @@
 [project]
 name = "pais-sdk-cli"
-version = "0.6.3"
+version = "0.6.4"
 description = "Contract-first Python SDK + CLI for VMware Private AI Service (PAIS), with mock server for offline development"
 readme = "README.md"
 requires-python = ">=3.10"
