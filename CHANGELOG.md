@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 · interactive shell + `pais-dev` script removed
+
+### ⚠️ Breaking changes
+- **`pais-dev` console script removed.** It was a redirect shim since v0.4.0; the entry is now gone from `[project.scripts]`. The `pais.cli.dev` Python module still exists (for stale `python -m pais.cli.dev` callers) and prints the same redirect message. Use `pais ingest <kb_ref>:<index_ref> <path>` instead.
+
+### Added
+- **`pais` (no args) drops into an interactive menu** when stdin is a TTY. The menu walks the live typer tree, lists every command with its one-line description, and lets you filter by typing or pick by arrow keys. Drilling into a command prompts for required arguments with type-aware widgets (text / confirm / select / path).
+- **Context-aware ref pickers.** When a command needs `kb_ref`, the menu fetches the live KB list from the server and lets you select; same for `index_ref` (scoped to the chosen KB), `agent_id`, splitter `kind`, MCP tools, and cached aliases. Each picker shows alias + name + UUID, includes an "✏ enter manually" fallback, and falls back to a plain text prompt on server errors so the menu never gets stuck.
+- **Destructive-op confirms.** For `*_delete`, `*_purge`, `index cancel`, and `agent delete`, the menu shows a single confirm prompt echoing the resolved label (e.g. `Really index delete kb_ref='kb_1' index_ref='idx_1'?`) and auto-passes `--yes` so the underlying command doesn't double-prompt.
+- **`pais shell`** — explicit alias for the interactive menu. Forces it on regardless of TTY detection (errors out cleanly if stdin really isn't a TTY).
+- **`--no-interactive`** global flag and **`PAIS_NONINTERACTIVE=1`** env var disable the bare-`pais` trigger.
+
+### Safety
+- The bare-`pais` interactive trigger is gated on `sys.stdin.isatty()` — `pais | head`, `pais </dev/null`, and CI scripts all keep printing the help banner instead of hanging on input.
+
 ## 0.4.2 · `pais status` shows agents + always-on indexes section
 
 Purely additive. No breaking changes.

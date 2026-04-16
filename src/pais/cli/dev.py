@@ -1,16 +1,8 @@
 """Redirect shim for the removed `pais-dev` console script.
 
-Anything `pais-dev` could do in v0.3 is now under `pais` directly:
-    pais-dev ingest-suites <dir> --kb <kb> --index <ix>
-        →  pais ingest <kb>:<ix> <dir>          (with the index's splitter set in pais.toml)
-        →  pais ingest <kb>:<ix> <dir> --splitter test_suite_md   (one-shot override)
-    pais-dev split-suite <file> --out <dir>
-        →  pais ingest <kb>:<ix> <file> --dry-run        (uploads nothing; review the chunks)
-    pais-dev ingest-suite <file> --kb <kb> --index <ix>
-        →  pais ingest <kb>:<ix> <file>
-
-This module exits 1 on every invocation so callers fail loudly instead of
-silently no-opping. Removed entirely in v0.5.
+The `pais-dev` console-script entry was dropped in v0.5.0. This module is
+kept only so `python -m pais.cli.dev` from a stale install still prints a
+useful redirect instead of an ImportError. Will be deleted in v0.6.
 """
 
 from __future__ import annotations
@@ -18,7 +10,7 @@ from __future__ import annotations
 import sys
 
 _MESSAGE = """\
-pais-dev was removed in v0.4. Use `pais ingest` instead.
+pais-dev was removed in v0.5.0. Use `pais ingest` instead.
 
 Quick translations:
   pais-dev ingest-suites <dir> --kb K --index I
