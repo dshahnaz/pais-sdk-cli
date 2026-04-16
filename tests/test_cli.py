@@ -76,6 +76,19 @@ def mock_runner(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
     return CliRunner()
 
 
+def test_broken_config_file_shows_clean_error(
+    mock_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bad = tmp_path / "pais.toml"
+    bad.write_text('mode = "http"\nbase_url = unquoted_value\n')
+    monkeypatch.setenv("PAIS_CONFIG", str(bad))
+    r = mock_runner.invoke(cli_app, ["config", "path", "--output", "json"])
+    assert r.exit_code == 1
+    assert "config error" in (r.output + (r.stderr or ""))
+    # No raw Python traceback leaked.
+    assert "Traceback" not in r.output
+
+
 def test_version_flag(mock_runner: CliRunner) -> None:
     from pais import __version__
 

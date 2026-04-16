@@ -71,6 +71,15 @@ def _root(
 ) -> None:
     """Pin --config / --profile so every subcommand's Settings() picks them up."""
     set_runtime_overrides(config_path=config, profile=profile)
+    # Eager validation: surface config-file errors here with a clean message
+    # rather than letting them bubble up as a Python traceback later.
+    from pais.cli._config_file import ConfigError, load_profile
+
+    try:
+        load_profile(path=config, profile=profile)
+    except ConfigError as e:
+        typer.echo(f"config error: {e}", err=True)
+        raise typer.Exit(code=1) from e
 
 
 def _client() -> PaisClient:

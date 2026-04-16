@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased] — 0.3.0 · config file, cleanup ops, cancel-indexing
+## 0.3.1
+
+### Fixed
+- `pais` and any subcommand now print a clean `config error: ...` message and exit 1 when the discovered TOML config file is invalid, instead of dumping a Python traceback.
+
+## 0.3.0 · config file, cleanup ops, cancel-indexing
 
 ### Added
 - **Persistent config file** (`~/.pais/config.toml` or `./pais.toml` — project wins) with `[profiles.<name>]` tables. Loaded by `Settings` so every command picks it up. New `pais config init / show / path` commands. New `--config` and `--profile` global CLI flags.
