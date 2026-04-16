@@ -307,7 +307,8 @@ class Store:
                 return self._update_kb(kb, json or {})
             if method == "DELETE":
                 del self._kbs[kb_id]
-                return {"deleted": True, "id": kb_id}
+                # Doc-aligned response body.
+                return {"id": kb_id, "object": "knowledge_base.deleted", "deleted": True}
             raise _HttpError(405, {"detail": f"method not allowed: {method}"})
 
         # Nested: /indexes/... or /data-sources
@@ -544,8 +545,10 @@ class Store:
         return ix.active_indexing.to_json()
 
     def _search(self, ix: _IndexRecord, payload: dict[str, Any]) -> dict[str, Any]:
-        query = payload.get("query", "")
-        top_n = int(payload.get("top_n", 5))
+        # Doc-aligned wire format: {text, top_k, similarity_cutoff}.
+        # Tolerate the legacy {query, top_n} shape too so older clients still work.
+        query = payload.get("text") or payload.get("query") or ""
+        top_n = int(payload.get("top_k") or payload.get("top_n") or 5)
         cutoff = float(payload.get("similarity_cutoff", 0.0))
         q_vec = fake_embed(query)
         hits: list[tuple[float, _Chunk, _DocumentRecord]] = []
@@ -558,13 +561,17 @@ class Store:
         hits = hits[:top_n]
         return {
             "object": "search_result",
-            "hits": [
+            # Doc-aligned response key; SDK normalizes `chunks` → `hits`.
+            "chunks": [
                 {
                     "document_id": c.document_id,
-                    "chunk_id": c.id,
-                    "text": c.text,
-                    "score": round(s, 6),
                     "origin_name": d.origin_name,
+                    "origin_ref": d.origin_name,
+                    "media_type": "text/markdown",
+                    "score": round(s, 6),
+                    "text": c.text,
+                    # Legacy back-compat for clients that still expect chunk_id.
+                    "chunk_id": c.id,
                 }
                 for s, c, d in hits
             ],
@@ -603,7 +610,8 @@ class Store:
                 return self._update_agent(agent, json or {})
             if method == "DELETE":
                 del self._agents[agent_id]
-                return {"deleted": True, "id": agent_id}
+                # Doc-aligned response body.
+                return {"id": agent_id, "object": "agent.deleted", "deleted": True}
             raise _HttpError(405, {"detail": f"method not allowed: {method}"})
         if sub == "chat/completions":
             return self._chat_completion(path, json or {}, stream=False, agent=agent)
@@ -681,7 +689,8 @@ class Store:
                             "similarity_cutoff": tool.get("similarity_cutoff", 0.0),
                         },
                     )
-                    for hit in res["hits"]:
+                    # Search returns the doc-aligned `chunks` key now.
+                    for hit in res.get("chunks") or res.get("hits") or []:
                         refs.append(hit)
                         augmentation += f"\n- {hit['text'][:160]}"
 

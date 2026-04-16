@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.6.4 · fix delete + search: SDK reconciled against the published Broadcom doc
+
+Three SDK ↔ doc mismatches found by re-fetching <https://developer.broadcom.com/xapis/vmware-private-ai-service-api/latest/>. The cleanup workflow's "delete looks like it does nothing" trace led to all three.
+
+### Fixed
+- **`pais index search` returned 0 hits silently.** SDK posted `{"query": "...", "top_n": 5}` but the doc says `{"text": "...", "top_k": N}`. Server ignored the unknown keys and returned no results. Same wire-format mismatch on the response (doc returns `{"chunks": [...]}`, SDK parsed `{"hits": [...]}`).
+- **`pais index delete` silently no-op'd on real PAIS.** Per-index DELETE isn't in the published doc — many deployments 404/405. The SDK assumed 200 = deleted and the cleanup workflow rendered green ✓ regardless. Now raises a new `IndexDeleteUnsupported` exception with actionable alternatives.
+- **Cleanup workflow banner lied about success.** A typo on the type-to-confirm prompt printed `[dim]aborted[/dim]` (easy to miss on a long resource name); a successful-looking DELETE that didn't actually remove the row got a green ✓ banner without verification.
+
+### Changed
+- **SDK `SearchQuery`** keeps Python field names `query` / `top_n` (callers unchanged) but serializes to the doc-aligned wire body `{text, top_k, similarity_cutoff}` via pydantic `serialization_alias`.
+- **SDK `SearchResponse`** now accepts both the doc-aligned `{"chunks": [...]}` shape and the legacy `{"hits": [...]}` shape via a `model_validator(mode="before")`. `.hits` is the canonical Python attribute either way.
+- **SDK `SearchHit`** gains `origin_ref` and `media_type` (doc fields); `chunk_id` becomes optional (absent in doc shape; kept for legacy back-compat).
+- **`PaisClient.indexes.delete()`** now probes-then-falls-back: 404/405 → `IndexDeleteUnsupported` (with `suggested_alternatives=["Delete the parent KB ...", "Purge contents (--strategy recreate; ...)"]`).
+- **Cleanup workflow (Workflow G)** now:
+  - Prints a **visible red** *"name didn't match"* line on confirm-by-typing failure (instead of `[dim]aborted[/dim]`).
+  - **Verifies deletion** by re-fetching after the DELETE call. Green ✓ banner only if `PaisNotFoundError`; red ✗ if the resource is still listed.
+  - Catches `IndexDeleteUnsupported` and presents a 3-option menu: *"Delete the parent KB"* / *"Purge contents (--strategy recreate)"* / *"← back"*.
+- **Mock server (`pais_mock`)** updated to emit the doc-aligned wire format for search and delete responses.
+
+### Added
+- New SDK exception `pais.errors.IndexDeleteUnsupported` (subclass of `PaisError`).
+- New `error_banner` (red) and `partial_banner` (yellow) helpers in `pais.cli._workflows._base` complementing the existing green `done_banner`.
+- 15 new tests across `test_search_doc_shape`, `test_index_delete_unsupported`, and extended `test_workflows_cleanup`.
+
+### Doc-verified facts (added to CLAUDE.md)
+- Search wire format: request `{text, top_k, similarity_cutoff}`; response `{chunks: [{origin_name, origin_ref, document_id, score, media_type, text}]}`. SDK wraps both with field aliases for back-compat.
+- Per-index DELETE is undocumented; some deployments lack it. SDK raises `IndexDeleteUnsupported`; CLI suggests deleting the parent KB instead.
+
 ## 0.6.3 · fix: shell logs leaked back through `from_settings` re-configure
 
 Hotfix for v0.6.2. The shell's WARNING override was undone by every `Settings.build_client()` call inside the menu loop — `PaisClient.from_settings(settings)` re-runs `configure_logging(level=settings.log_level)`, and `settings.log_level` was still `"INFO"`. The fix: also mutate `settings.log_level = "WARNING"` (only in the shell, only when `PAIS_VERBOSE` is unset) so subsequent `from_settings` calls keep the WARNING floor.

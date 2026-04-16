@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, Literal
 
-from pais.errors import PaisError, PaisNotFoundError
+from pais.errors import IndexDeleteUnsupported, PaisError, PaisNotFoundError
 from pais.logging import get_logger
 from pais.models.common import ListResponse
 from pais.models.index import (
@@ -84,7 +84,19 @@ class IndexesResource(Resource[Index]):
         return Index.model_validate(raw)
 
     def delete(self, kb_id: str, index_id: str) -> None:  # type: ignore[override]
-        self._delete(f"{self._path_for_kb(kb_id)}/{index_id}")
+        """DELETE an index. The endpoint isn't in the published Broadcom doc; some
+        deployments expose it, others 404/405. Probe-then-fallback: on a missing
+        endpoint, raise `IndexDeleteUnsupported` with actionable alternatives so
+        callers (CLI cleanup workflow) can guide the user."""
+        try:
+            self._delete(f"{self._path_for_kb(kb_id)}/{index_id}")
+        except (PaisNotFoundError, PaisError) as e:
+            if _is_endpoint_missing(e):
+                raise IndexDeleteUnsupported(
+                    status_code=getattr(e, "status_code", None),
+                    request_id=getattr(e, "request_id", None),
+                ) from e
+            raise
 
     # ---- Documents -----------------------------------------------------------
     def list_documents(self, kb_id: str, index_id: str) -> ListResponse[Document]:
@@ -164,11 +176,13 @@ class IndexesResource(Resource[Index]):
 
     # ---- Search --------------------------------------------------------------
     def search(self, kb_id: str, index_id: str, query: SearchQuery) -> SearchResponse:
+        # `by_alias=True` produces the doc-aligned wire body
+        # `{text, top_k, similarity_cutoff}` (Python field names stay query/top_n).
         raw = self._post_json(
             f"{self._path_for_kb(kb_id)}/{index_id}/search",
-            json=query.model_dump(mode="json", exclude_none=True),
+            json=query.model_dump(mode="json", by_alias=True, exclude_none=True),
         )
-        # Some PAIS builds return bare list of hits; normalize.
+        # Some PAIS builds return a bare list of hits; normalize.
         if isinstance(raw, list):
             return SearchResponse(hits=[SearchHit.model_validate(h) for h in raw])
         return SearchResponse.model_validate(raw)
@@ -245,12 +259,23 @@ class IndexesResource(Resource[Index]):
         return PurgeResult(strategy_used="api", documents_deleted=deleted, errors=errors)
 
     def _purge_recreate(self, kb_id: str, index_id: str) -> PurgeResult:
-        """Delete the index and recreate it with the same configuration."""
+        """Delete the index and recreate it with the same configuration.
+
+        Raises `IndexDeleteUnsupported` (re-thrown with clearer context) if the
+        deployment doesn't expose per-index DELETE — the recreate strategy is
+        unavailable on those servers.
+        """
         ix = self.get(kb_id, index_id)
         deleted_count = self.list_documents(kb_id, index_id).num_objects
         if deleted_count is None:
             deleted_count = len(self.list_documents(kb_id, index_id).data)
-        self.delete(kb_id, index_id)
+        try:
+            self.delete(kb_id, index_id)
+        except IndexDeleteUnsupported as e:
+            raise IndexDeleteUnsupported(
+                "recreate strategy unavailable: PAIS doesn't expose per-index "
+                "DELETE on this deployment. Delete the parent KB to clear contents."
+            ) from e
         new_payload = IndexCreate(
             name=ix.name,
             description=ix.description,
