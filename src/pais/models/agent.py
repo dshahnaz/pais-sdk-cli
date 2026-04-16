@@ -34,6 +34,11 @@ class Agent(PaisModel):
     session_summarization_strategy: str = "delete_oldest"
     index_reference_format: str | None = "structured"
     chat_system_instruction_mode: str = "system-message"
+    # Doc-aligned: agent points at an index UUID directly.
+    index_id: str | None = None
+    index_top_n: int | None = None
+    # Legacy: tools=[ToolLink(...)] kept for back-compat with deployments
+    # that still wire MCP tools through the agent surface.
     tools: list[ToolLink] = []
     status: str = "READY"
 
@@ -48,6 +53,10 @@ class AgentCreate(PaisModel):
     session_summarization_strategy: str = "delete_oldest"
     index_reference_format: str | None = "structured"
     chat_system_instruction_mode: str = "system-message"
+    # Doc-aligned: prefer this for new code.
+    index_id: str | None = None
+    index_top_n: int | None = None
+    # Legacy fallback.
     tools: list[ToolLink] = []
 
 

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from pais.cli import _alias, _pickers, interactive
+from pais.cli import _alias, _landing, _pickers, interactive
 from pais.cli._introspect import walk
 from pais.cli.app import app
 from pais.client import PaisClient
@@ -55,6 +55,7 @@ def fake_q(monkeypatch: pytest.MonkeyPatch) -> _FakeQuestionary:
     fq = _FakeQuestionary()
     monkeypatch.setattr(interactive, "questionary", fq)
     monkeypatch.setattr(_pickers, "questionary", fq)
+    monkeypatch.setattr(_landing, "questionary", fq)
     return fq
 
 
@@ -91,16 +92,18 @@ def test_index_delete_flow_dispatches_with_resolved_uuids(
         t for t in (f"{s.display:24s}  {s.help or '—'}" for s in specs) if "index delete" in t
     )
 
-    # Script: top menu → KB picker → index picker → confirm.
-    # The KB and index pickers each produce a list whose first item is the only one.
+    # Script: landing → flat menu → KB picker → index picker → confirm.
+    # First land on the v0.6 landing screen; pick the flat-menu fallback.
     fake_q.script(
-        target_menu_title,  # top menu pick
+        "📋  all commands…",  # landing screen → fall through to flat menu
+        target_menu_title,  # flat menu pick
         # KB picker title format: f"—  {kb.name}  ({kb.id})" — no alias declared.
         f"—  kb1  ({kb.id})",
         # Index picker — mock returns status=AVAILABLE, no num_documents → "—".
         f"—  ix1  (status=AVAILABLE, docs=—, id={ix.id})",
         True,  # destructive confirm
-        # Loop iteration 2: pick QUIT.
+        # Loop iteration 2: landing again, then ⏏ quit on the flat menu.
+        "📋  all commands…",
         "⏏  quit",
     )
 
@@ -118,10 +121,11 @@ def test_index_delete_flow_dispatches_with_resolved_uuids(
 
 
 def test_quit_exits_immediately(fake_q: _FakeQuestionary, isolated_cache: None) -> None:
-    fake_q.script("⏏  quit")
+    """Landing screen → fall through to flat menu → quit."""
+    fake_q.script("📋  all commands…", "⏏  quit")
     interactive.enter_interactive(app)
-    assert len(fake_q.calls) == 1
-    assert fake_q.calls[0]["kind"] == "select"
+    # Two select calls: landing + flat menu.
+    assert len([c for c in fake_q.calls if c["kind"] == "select"]) == 2
 
 
 def test_picker_status_label_lookup(fake_q: _FakeQuestionary, isolated_cache: None) -> None:

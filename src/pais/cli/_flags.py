@@ -64,6 +64,12 @@ EPOCH_OPT = typer.Option(
     False, "--epoch", "-e", help="Print epoch timestamps instead of human dates."
 )
 FORCE_OPT = typer.Option(False, "--force", "-f", help="Force the destructive op.")
+QUICK_CONFIRM_OPT = typer.Option(
+    False,
+    "--quick-confirm",
+    "-Q",
+    help="In the interactive shell, fall back to y/N for destructive ops (skip type-to-confirm).",
+)
 
 # Wire `-h` globally on every Typer app via this dict.
 HELP_OPTION_NAMES = {"help_option_names": ["-h", "--help"]}

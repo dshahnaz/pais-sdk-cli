@@ -16,6 +16,8 @@ class IndexRefreshPolicyType(str, Enum):
 class DataOriginType(str, Enum):
     LOCAL_FILES = "LOCAL_FILES"
     DATA_SOURCE = "DATA_SOURCE"
+    # Per the published Broadcom doc; some PAIS deployments use the plural form.
+    DATA_SOURCES = "DATA_SOURCES"
 
 
 class IndexRefreshPolicy(PaisModel):

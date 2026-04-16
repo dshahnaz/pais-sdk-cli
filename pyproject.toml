@@ -1,6 +1,6 @@
 [project]
 name = "pais-sdk-cli"
-version = "0.5.0"
+version = "0.6.0"
 description = "Contract-first Python SDK + CLI for VMware Private AI Service (PAIS), with mock server for offline development"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "tomli>=2.0; python_version < '3.11'",
     "questionary>=2.0,<3",
+    "tomli-w>=1.0",
 ]
 
 [project.optional-dependencies]

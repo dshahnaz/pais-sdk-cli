@@ -49,29 +49,52 @@ _QUIT = "⏏  quit"
 
 
 def enter_interactive(app: typer.Typer) -> None:
-    """Run the menu loop until the user picks Quit (or hits Ctrl-C)."""
+    """Run the menu loop until the user picks Quit (or hits Ctrl-C).
+
+    v0.6 wraps the v0.5 flat command menu with a smart landing screen:
+    bare entry shows env state + a recommended workflow; the user picks a
+    workflow (orchestrated multi-step flow) OR falls through to the flat
+    typer command list.
+    """
+    from pais.cli._landing import show_landing
+
     console = Console()
     settings = Settings()
-    console.print(
-        f"[bold]PAIS interactive shell[/bold] · "
-        f"profile=[cyan]{settings.profile or 'default'}[/cyan] · "
-        f"mode=[cyan]{settings.mode}[/cyan]"
-    )
-    console.print("[dim]Pick a command (type to filter, ↵ to select). ⏏ quit to exit.[/dim]\n")
 
     while True:
-        specs = walk(app)
-        choice = _select_command(specs)
-        if choice is None:
+        try:
+            with settings.build_client() as client:
+                workflow = show_landing(client, settings, console)
+        except KeyboardInterrupt:
             console.print("[dim]bye[/dim]")
             return
+        if workflow is None:
+            # User picked "📋 all commands…" (or hit Esc on landing) — fall
+            # through to the v0.5 flat menu for one selection, then loop back.
+            specs = walk(app)
+            choice = _select_command(specs)
+            if choice is None:
+                console.print("[dim]bye[/dim]")
+                return
+            try:
+                _dispatch(choice, settings, console)
+            except KeyboardInterrupt:
+                console.print("\n[dim]aborted; back to menu[/dim]\n")
+            except PaisError as e:
+                console.print(f"[red]error:[/red] {e}\n")
+            except Exception as e:  # pragma: no cover
+                console.print(f"[red]error:[/red] {type(e).__name__}: {e}\n")
+            continue
+
+        # Run the chosen workflow
         try:
-            _dispatch(choice, settings, console)
+            with settings.build_client() as client:
+                workflow.run(client, settings, console)
         except KeyboardInterrupt:
             console.print("\n[dim]aborted; back to menu[/dim]\n")
         except PaisError as e:
             console.print(f"[red]error:[/red] {e}\n")
-        except Exception as e:  # pragma: no cover — surface unexpected
+        except Exception as e:  # pragma: no cover
             console.print(f"[red]error:[/red] {type(e).__name__}: {e}\n")
 
 
