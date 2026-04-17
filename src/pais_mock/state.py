@@ -181,6 +181,13 @@ class Store:
                 "model_engine": "INFINITY",
                 "owned_by": "pais",
             },
+            {
+                "id": "local/llama-cpp-7b",
+                "object": "model",
+                "model_type": "COMPLETIONS",
+                "model_engine": "LLAMA_CPP",
+                "owned_by": "pais",
+            },
         ]
         self._created = itertools.count(1_700_000_000)
         self._kb_ids = itertools.count(1)

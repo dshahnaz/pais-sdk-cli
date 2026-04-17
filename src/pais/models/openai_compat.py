@@ -20,11 +20,17 @@ class ModelEngine(str, Enum):
 
 
 class Model(PaisModel):
+    """A model routing entry. `model_type` and `model_engine` are typed as
+    `str` (not Enum) because the doc treats them as free-form strings and
+    real deployments return values beyond the documented set (e.g. `LLAMA_CPP`).
+    Use `ModelType.COMPLETIONS` / `ModelEngine.VLLM` etc. as named constants
+    for comparison — they're str-Enums so equality works both ways."""
+
     id: str
     object: Literal["model"] = "model"
     created: int | None = None
-    model_type: ModelType | None = None
-    model_engine: ModelEngine | None = None
+    model_type: str | None = None
+    model_engine: str | None = None
     owned_by: str | None = None
 
 

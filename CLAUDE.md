@@ -4,7 +4,7 @@ This file is auto-loaded when working in `pais-sdk-cli`. Read this before changi
 
 ## What this is
 
-Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled mock server (`pais_mock`) for offline development. Public on GitHub: <https://github.com/dshahnaz/pais-sdk-cli>. Latest tag: `v0.6.4` (see `pyproject.toml`/`__version__` for current).
+Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled mock server (`pais_mock`) for offline development. Public on GitHub: <https://github.com/dshahnaz/pais-sdk-cli>. Latest tag: `v0.6.5` (see `pyproject.toml`/`__version__` for current).
 
 ## Layout (one-pager)
 
@@ -42,6 +42,9 @@ These shape the design — never assume otherwise without re-checking the docs:
 8. **MCP tools endpoint** (`/mcp/tools`) is not in the published spec. Treat as undocumented / legacy; new agent creation should not depend on it.
 9. **Search wire format**: request body is `{"text": "...", "top_k": N, "similarity_cutoff": F}`; response body is `{"chunks": [{origin_name, origin_ref, document_id, score, media_type, text}]}`. Our SDK keeps Python field names `query` / `top_n` and accepts both `chunks` and legacy `hits` responses via `serialization_alias` + a before-validator. Don't break that wrapping.
 10. **Per-index DELETE endpoint** is undocumented. Deployments may 404/405. SDK raises `IndexDeleteUnsupported` (a `PaisError` subclass) with `suggested_alternatives`. CLI cleanup workflow catches it and offers "Delete parent KB (cascades)" or "Purge --strategy recreate". KB delete (`DELETE /knowledge-bases/{id}`) and Agent delete (`DELETE /agents/{id}`) ARE documented and cascade.
+11. **Doc types every status field as `string`** — `model_engine`, `model_type`, `Index.status`, `Indexing.state`, `Document.state`, `data_origin_type`, `IndexRefreshPolicy.policy_type`, `ToolLink.link_type`, `DataSource.type`. Our SDK uses `str` for these (Enum classes kept as named constants: `ModelEngine.VLLM == "VLLM"`). Don't revert them to Enum-typed — it crashes on unknown values like `LLAMA_CPP`.
+12. **No `/health` endpoint documented.** Reachability check uses HEAD on the base URL — any HTTP response (incl. 4xx/5xx) means TCP+TLS work.
+13. **No server-side log endpoint documented.** Logs are client-side only (`~/.pais/logs/pais.log`, rotating). `pais doctor` collates everything for support.
 
 ## Tooling
 

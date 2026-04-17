@@ -71,6 +71,8 @@ def done_banner(console: Console, title: str, summary: dict[str, Any]) -> None:
 def error_banner(console: Console, title: str, summary: dict[str, Any]) -> None:
     """Render a red ✗ panel — use when the operation failed (verified)."""
     body_lines = [f"[bold]{k}[/bold]  {v}" for k, v in summary.items()]
+    body_lines.append("")
+    body_lines.append("[dim]Run `pais doctor` for a full diagnostic to share.[/dim]")
     console.print(
         Panel.fit(
             "\n".join(body_lines),

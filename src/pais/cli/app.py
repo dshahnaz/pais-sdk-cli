@@ -20,8 +20,10 @@ from pais.cli._flags import (
     YES_OPT,
 )
 from pais.cli._output import exit_code_for, render
+from pais.cli.doctor_cmd import doctor as doctor_cmd
 from pais.cli.ensure_cmd import kb_ensure
 from pais.cli.ingest_cmd import alias_app, ingest_app, splitters_app
+from pais.cli.logs_cmd import app as logs_app
 from pais.cli.shell_cmd import shell as shell_cmd
 from pais.cli.status_cmd import status as status_cmd
 from pais.client import PaisClient
@@ -62,6 +64,10 @@ app.add_typer(splitters_app, name="splitters")
 app.add_typer(alias_app, name="alias")
 app.command("status")(status_cmd)
 app.command("shell", help="Open the interactive PAIS menu (force).")(shell_cmd)
+app.command("doctor", help="Run a diagnostic probe battery and emit a shareable report.")(
+    doctor_cmd
+)
+app.add_typer(logs_app, name="logs")
 
 
 def _print_version_and_exit(value: bool) -> None:
