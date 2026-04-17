@@ -158,6 +158,9 @@ def test_picker_for_dispatch_table() -> None:
     # Model pickers (v0.6.8).
     assert picker_for(("index", "create"), "embeddings_model") is not None
     assert picker_for(("agent", "create"), "model") is not None
+    # v0.7.1: `agent create` uses `index_id` (doc-aligned), not MCP tools.
+    assert picker_for(("agent", "create"), "index_id") is not None
+    assert picker_for(("agent", "create"), "kb_search_tool") is None
     # Unknown param → no picker.
     assert picker_for(("kb", "create"), "name") is None
 

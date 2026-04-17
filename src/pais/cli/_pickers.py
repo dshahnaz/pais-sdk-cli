@@ -324,7 +324,10 @@ _OVERRIDES: dict[tuple[tuple[str, ...] | None, str], Picker] = {
     (None, "agent_id"): pick_agent,
     (("splitters", "show"), "kind"): pick_splitter_kind,
     (("alias", "clear"), "alias"): pick_cached_alias,
-    (("agent", "create"), "kb_search_tool"): pick_mcp_tool,
+    # `agent create` is doc-aligned: pick an index, not an MCP tool.
+    # The `--kb-search-tool` flag still exists (hidden) for legacy deployments,
+    # and `pick_mcp_tool` remains callable for explicit advanced flows.
+    (("agent", "create"), "index_id"): pick_index,
     (("index", "create"), "embeddings_model"): pick_embeddings_model,
     (("agent", "create"), "model"): pick_chat_model,
 }

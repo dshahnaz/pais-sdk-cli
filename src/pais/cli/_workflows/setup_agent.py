@@ -320,6 +320,12 @@ def run(client: PaisClient, settings: Settings, console: Console) -> None:
                 hint="number of search hits to include per turn",
                 re_prompt=lambda _v: _int_prompt("index_top_n:", default=5),
             ),
+            FieldSpec(
+                name="index_similarity_cutoff",
+                value=0.0,
+                hint="minimum similarity score (0.0 disables filtering)",
+                re_prompt=lambda _v: _float_prompt("index_similarity_cutoff:", default=0.0),
+            ),
         ],
     )
     result = prompt_review_screen(spec, console)
@@ -335,6 +341,7 @@ def run(client: PaisClient, settings: Settings, console: Console) -> None:
             instructions=result["instructions"],
             index_id=result["index_id"],
             index_top_n=int(result["index_top_n"]),
+            index_similarity_cutoff=float(result["index_similarity_cutoff"]),
         )
     )
     _recent.record_use("agents", agent.id, profile=profile)
@@ -402,6 +409,18 @@ def _int_prompt(label: str, *, default: int) -> int:
         validate=lambda v: v.strip().isdigit() or "must be a positive integer",
     ).ask()
     return int(ans) if ans else default
+
+
+def _float_prompt(label: str, *, default: float) -> float:
+    def _ok(v: str) -> bool | str:
+        try:
+            float(v)
+            return True
+        except ValueError:
+            return "must be a number"
+
+    ans = questionary.text(label, default=str(default), validate=_ok).ask()
+    return float(ans) if ans else default
 
 
 def _branch_to_ingest(

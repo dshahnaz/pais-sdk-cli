@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.1 · `agent create` doc-aligned; survive undocumented MCP endpoint
+
+### Fixed
+
+- **Interactive `pais agent create` no longer crashes on deployments where `/control/mcp-servers/tools` returns an unexpected shape.** The picker dispatch for the `agent create` menu used to route through `pick_mcp_tool`, which hit an undocumented endpoint; on production PAIS the response didn't match our strict `McpTool` model and blew up with `ListResponse[McpTool]` validation errors (`name` missing, `server` wrong type, `input_schema` wrong type). The shell now prompts for an index instead — aligning with the published doc shape — and the MCP tools resource degrades to an empty list + one warning when the server returns an unexpected payload, rather than raising.
+
+### Added
+
+- **`index_similarity_cutoff` on `Agent` / `AgentCreate` / `AgentUpdate`** — doc-aligned optional field that travels alongside `index_id` and `index_top_n`. Defaults to `None`, so older PAIS builds that ignore unknown fields still round-trip cleanly.
+- **`pais agent create --index-id / --index-top-n / --index-similarity-cutoff`** — new doc-aligned flags on the flat CLI command. When `--index-id` is set, the three fields are sent on `AgentCreate` directly (no `tools` array). The `/setup-agent` workflow's review screen also prompts for the similarity cutoff now.
+- **`typer.Option(..., hidden=True)` is honored by the interactive shell.** `_introspect.ParamSpec` gained a `hidden` field; `interactive.py` skips hidden params in the prompt loop. Keeps scripted back-compat flags callable without re-exposing them in the menu.
+
+### Changed
+
+- **`pais agent create` interactive flow now prompts for an index, not an MCP tool.** The picker dispatch swapped `("agent","create"), "kb_search_tool" → pick_mcp_tool` for `("agent","create"), "index_id" → pick_index`.
+- **`--kb-search-tool` is now hidden on `pais agent create`** (still callable from scripts for deployments that wire agents via legacy `ToolLink`s, but no longer surfaces in `--help` or the interactive prompt).
+- **`McpTool.name` and `McpTool.server` are now optional.** The endpoint is undocumented (CLAUDE.md constraint #8) and its shape varies across deployments; only `id` is required. Callers that need a label should use `t.name or "?"` / `t.server or "built-in"`.
+
 ## 0.7.0 · dedicated test-suite splitters, preview --dump, scaffolder
 
 ### ⚠️ Breaking changes

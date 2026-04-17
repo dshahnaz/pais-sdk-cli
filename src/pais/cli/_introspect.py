@@ -32,6 +32,7 @@ class ParamSpec:
     required: bool
     help: str | None
     param_decls: tuple[str, ...] | None = None  # ("--epoch", "-e"); None for arguments
+    hidden: bool = False  # typer.Option(..., hidden=True) → skipped in the shell
 
 
 @dataclass
@@ -144,6 +145,7 @@ def _params(cb: Callable[..., Any]) -> list[ParamSpec]:
                     required=required,
                     help=info.help,
                     param_decls=tuple(info.param_decls) if info.param_decls else None,
+                    hidden=bool(getattr(info, "hidden", False)),
                 )
             )
         else:

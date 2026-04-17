@@ -575,11 +575,23 @@ def agent_create(
     name: str = typer.Option(...),
     model: str = typer.Option(...),
     instructions: str | None = typer.Option(None),
-    kb_search_tool: str | None = typer.Option(
-        None, "--kb-search-tool", help="MCP tool id of a KB-index-search tool to link"
+    index_id: str | None = typer.Option(
+        None, "--index-id", help="Index UUID to link as the agent's KB source"
     ),
-    top_n: int = 5,
-    similarity_cutoff: float = 0.0,
+    index_top_n: int = typer.Option(
+        5, "--index-top-n", help="How many chunks the agent retrieves per query"
+    ),
+    index_similarity_cutoff: float = typer.Option(
+        0.0,
+        "--index-similarity-cutoff",
+        help="Minimum similarity score for retrieved chunks (0.0 disables filtering)",
+    ),
+    kb_search_tool: str | None = typer.Option(
+        None,
+        "--kb-search-tool",
+        hidden=True,
+        help="[legacy] MCP tool id of a KB-index-search tool; prefer --index-id",
+    ),
     output: str = OUTPUT_OPT,
 ) -> None:
     def go() -> None:
@@ -590,12 +602,20 @@ def agent_create(
                     ToolLink(
                         link_type=ToolLinkType.PAIS_KNOWLEDGE_BASE_INDEX_SEARCH_TOOL_LINK,
                         tool_id=kb_search_tool,
-                        top_n=top_n,
-                        similarity_cutoff=similarity_cutoff,
+                        top_n=index_top_n,
+                        similarity_cutoff=index_similarity_cutoff,
                     )
                 )
             agent = c.agents.create(
-                AgentCreate(name=name, model=model, instructions=instructions, tools=tools)
+                AgentCreate(
+                    name=name,
+                    model=model,
+                    instructions=instructions,
+                    index_id=index_id,
+                    index_top_n=index_top_n if index_id else None,
+                    index_similarity_cutoff=(index_similarity_cutoff if index_id else None),
+                    tools=tools,
+                )
             )
             render(agent, fmt=output)
 

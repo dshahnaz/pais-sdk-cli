@@ -16,7 +16,10 @@ class McpToolLinkType(str, Enum):
 class McpTool(PaisModel):
     id: str
     object: Literal["mcp_tool"] = "mcp_tool"
-    name: str
+    # `/control/mcp-servers/tools` is not in the published PAIS spec (see
+    # CLAUDE.md constraint #8). Field shapes vary across deployments, so
+    # everything except `id` is tolerant — callers should use `or`-fallbacks.
+    name: str | None = None
     description: str | None = None
-    server: str = "built-in"
+    server: str | None = None
     input_schema: dict[str, Any] | None = None

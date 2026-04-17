@@ -172,6 +172,10 @@ def _dispatch(spec: CommandSpec, settings: Settings, console: Console) -> None:
 
         is_destructive = spec.path in _DESTRUCTIVE
         for param in spec.params:
+            # Hidden params are for scripted use only — keep them callable via
+            # flags but skip the interactive prompt so the shell stays quiet.
+            if param.hidden:
+                continue
             # The destructive confirm below auto-injects `yes=True`; don't
             # prompt the user about it separately.
             if is_destructive and param.name == "yes":
