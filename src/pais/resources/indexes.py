@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, Literal
@@ -23,6 +24,8 @@ from pais.models.index import (
     SearchResponse,
 )
 from pais.resources._base import Resource
+
+ProgressCb = Callable[..., None]
 
 _log = get_logger("pais.indexes")
 
@@ -252,6 +255,7 @@ class IndexesResource(Resource[Index]):
         *,
         strategy: CleanupStrategy = "auto",
         match_origin_prefix: str | None = None,
+        on_progress: ProgressCb | None = None,
     ) -> PurgeResult:
         """Delete documents from an index.
 
@@ -264,14 +268,43 @@ class IndexesResource(Resource[Index]):
 
         ``match_origin_prefix`` filters documents whose ``origin_name`` starts
         with the prefix. Used by ``--replace`` to only purge re-uploaded suites.
+
+        ``on_progress`` is an optional callback invoked as ``on_progress(event,
+        **payload)`` at key milestones — used by the CLI to drive a Rich
+        progress bar, but any caller can use it. Events:
+
+        * ``"collected"`` — after pagination finishes. ``total=int``.
+        * ``"deleted"``   — after each successful DELETE.
+          ``deleted=int, total=int, doc_id=str, origin=str``.
+        * ``"error"``     — a non-fallback delete raised.
+          ``doc_id=str, error=str``.
+        * ``"done"``      — return path.
+          ``deleted=int, errors=int, strategy_used=str``.
+
+        Any exception raised by the callback is swallowed — a broken UI must
+        not corrupt a destructive op.
         """
+
+        def _emit(event: str, **payload: Any) -> None:
+            if on_progress is None:
+                return
+            with contextlib.suppress(Exception):
+                on_progress(event, **payload)  # a buggy UI must not abort deletion
+
         if strategy == "recreate":
             if match_origin_prefix is not None:
                 raise ValueError(
                     "strategy='recreate' deletes the entire index and cannot be "
                     "combined with match_origin_prefix"
                 )
-            return self._purge_recreate(kb_id, index_id)
+            result = self._purge_recreate(kb_id, index_id)
+            _emit(
+                "done",
+                deleted=result.documents_deleted,
+                errors=len(result.errors),
+                strategy_used=result.strategy_used,
+            )
+            return result
 
         # Collect every matching doc id up front — paginating the listing — then
         # delete. Deleting while iterating would invalidate the server-side cursor
@@ -282,15 +315,20 @@ class IndexesResource(Resource[Index]):
             if match_origin_prefix is None or doc.origin_name.startswith(match_origin_prefix):
                 targets.append((doc.id, doc.origin_name))
 
+        _emit("collected", total=len(targets))
+
         if not targets:
+            _emit("done", deleted=0, errors=0, strategy_used="api")
             return PurgeResult(strategy_used="api", documents_deleted=0)
 
         deleted = 0
         errors: list[str] = []
-        for i, (doc_id, _origin) in enumerate(targets):
+        total = len(targets)
+        for i, (doc_id, origin) in enumerate(targets):
             try:
                 self.delete_document(kb_id, index_id, doc_id)
                 deleted += 1
+                _emit("deleted", deleted=deleted, total=total, doc_id=doc_id, origin=origin)
             except (PaisNotFoundError, PaisError) as e:
                 # On the FIRST attempt, treat 404/405 as endpoint-missing and fall back.
                 if i == 0 and strategy == "auto" and _is_endpoint_missing(e):
@@ -299,6 +337,7 @@ class IndexesResource(Resource[Index]):
                             "PAIS lacks per-document DELETE; cannot purge by prefix. "
                             "Use --strategy recreate (drops the entire index) or upgrade PAIS."
                         )
+                        _emit("done", deleted=0, errors=len(errors), strategy_used="api")
                         return PurgeResult(strategy_used="api", documents_deleted=0, errors=errors)
                     _log.warning(
                         "pais.purge.fallback_recreate",
@@ -306,18 +345,28 @@ class IndexesResource(Resource[Index]):
                         index_id=index_id,
                         reason=str(e),
                     )
-                    return self._purge_recreate(kb_id, index_id)
+                    result = self._purge_recreate(kb_id, index_id)
+                    _emit(
+                        "done",
+                        deleted=result.documents_deleted,
+                        errors=len(result.errors),
+                        strategy_used=result.strategy_used,
+                    )
+                    return result
                 if strategy == "api" and _is_endpoint_missing(e):
                     errors.append(
                         f"PAIS deployment does not expose DELETE /documents/{{id}} "
                         f"(error on first doc {doc_id}: {e})"
                     )
+                    _emit("done", deleted=deleted, errors=len(errors), strategy_used="api")
                     return PurgeResult(
                         strategy_used="api",
                         documents_deleted=deleted,
                         errors=errors,
                     )
                 errors.append(f"{doc_id}: {type(e).__name__}: {e}")
+                _emit("error", doc_id=doc_id, error=str(e))
+        _emit("done", deleted=deleted, errors=len(errors), strategy_used="api")
         return PurgeResult(strategy_used="api", documents_deleted=deleted, errors=errors)
 
     def _purge_recreate(self, kb_id: str, index_id: str) -> PurgeResult:

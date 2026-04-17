@@ -4,7 +4,7 @@ This file is auto-loaded when working in `pais-sdk-cli`. Read this before changi
 
 ## What this is
 
-Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled mock server (`pais_mock`) for offline development. Public on GitHub: <https://github.com/dshahnaz/pais-sdk-cli>. Latest tag: `v0.6.6` (see `pyproject.toml`/`__version__` for current).
+Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled mock server (`pais_mock`) for offline development. Public on GitHub: <https://github.com/dshahnaz/pais-sdk-cli>. Latest tag: `v0.6.7` (see `pyproject.toml`/`__version__` for current).
 
 ## Layout (one-pager)
 
@@ -33,7 +33,7 @@ Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled
   - `config.py` — pydantic-settings: env > config-file profile > .env > defaults
   - `errors.py` (includes `IndexDeleteUnsupported`), `logging.py`
 - `src/pais_mock/{server,state,behaviors}.py` — FastAPI mock + in-memory `Store`; emits doc-aligned wire shapes (`{chunks: [...]}` for search, `{deleted: true}` for KB/agent delete)
-- `tests/` — 317 tests across contract, transport, auth, resources, CLI, ingest, alias resolver, ensure, interactive, workflows, pickers, landing, recent, config writeback, splitter meta/preview, search doc shape, index delete, cleanup verify + document pagination, doctor, logs, relaxed enums, verbosity tiers. Coverage gate: ≥ 85 % on touched modules.
+- `tests/` — 324 tests across contract, transport, auth, resources, CLI, ingest, alias resolver, ensure, interactive, workflows, pickers, landing, recent, config writeback, splitter meta/preview, search doc shape, index delete, cleanup verify + document pagination + purge progress callbacks, TLS warning dedup, doctor, logs, relaxed enums, verbosity tiers. Coverage gate: ≥ 85 % on touched modules.
 - `docs/` — `ingestion.md`, `architecture.md`, `migration-0.3-to-0.4.md`, `v0.4-plan.md`
 - `.github/workflows/ci.yml` — matrix Python 3.10 / 3.11 / 3.12
 
@@ -82,7 +82,7 @@ pais logs tail -n 50             # last 50 lines
 pais -v                          # shell with full INFO logs
 ```
 
-## Release / publish ritual (followed for v0.1–v0.6.6; keep doing this)
+## Release / publish ritual (followed for v0.1–v0.6.7; keep doing this)
 
 1. Branch: `git checkout -b feat/<short-name>` (or `fix/…`, `chore/…`).
 2. Make changes. Add tests. Update docs (every user-facing change → README + CHANGELOG).

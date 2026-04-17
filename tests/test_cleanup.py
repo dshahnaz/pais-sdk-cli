@@ -162,6 +162,77 @@ def test_purge_removes_every_document_across_pages() -> None:
     assert remaining == []
 
 
+def test_purge_on_progress_callback_counts_match() -> None:
+    """v0.6.7 regression: `on_progress` must fire exactly the right events
+    at the right counts so the CLI's Rich progress bar renders correctly."""
+    store = Store()
+    c = PaisClient(FakeTransport(store))
+    kb_id, [ix_id] = _provision(c)
+    _upload(c, kb_id, ix_id, [f"doc_{i}.md" for i in range(10)])
+
+    events: list[tuple[str, dict]] = []
+
+    def on_progress(event: str, **payload: object) -> None:
+        events.append((event, dict(payload)))
+
+    res = c.indexes.purge(kb_id, ix_id, strategy="api", on_progress=on_progress)
+    assert res.documents_deleted == 10
+
+    event_names = [e[0] for e in events]
+    # Exactly one "collected" then 10 "deleted" then one "done".
+    assert event_names.count("collected") == 1
+    assert event_names.count("deleted") == 10
+    assert event_names.count("done") == 1
+    # "collected" must come first, "done" must come last.
+    assert event_names[0] == "collected"
+    assert event_names[-1] == "done"
+    # Each "deleted" carries the running count and total.
+    for i, (ev, payload) in enumerate(events[1:-1], start=1):
+        assert ev == "deleted"
+        assert payload["deleted"] == i
+        assert payload["total"] == 10
+
+
+def test_purge_on_progress_swallows_callback_exceptions() -> None:
+    """A buggy callback must not corrupt the delete loop."""
+    store = Store()
+    c = PaisClient(FakeTransport(store))
+    kb_id, [ix_id] = _provision(c)
+    _upload(c, kb_id, ix_id, ["a.md", "b.md", "c.md"])
+
+    def bad_cb(event: str, **payload: object) -> None:
+        raise RuntimeError(f"boom on {event}")
+
+    res = c.indexes.purge(kb_id, ix_id, strategy="api", on_progress=bad_cb)
+    # Every doc still deleted despite the callback raising on every event.
+    assert res.documents_deleted == 3
+    assert c.indexes.list_documents(kb_id, ix_id).data == []
+
+
+def test_kb_purge_emits_index_start_and_index_done() -> None:
+    """The KB-level purge must emit `index_start` / `index_done` around each
+    inner `indexes.purge` call so the bar can switch contexts."""
+    store = Store()
+    c = PaisClient(FakeTransport(store))
+    kb_id, ix_ids = _provision(c, n_indexes=2)
+    for ix_id in ix_ids:
+        _upload(c, kb_id, ix_id, [f"{ix_id}_a.md", f"{ix_id}_b.md"])
+
+    events: list[str] = []
+
+    def on_progress(event: str, **_payload: object) -> None:
+        events.append(event)
+
+    res = c.knowledge_bases.purge(kb_id, strategy="api", on_progress=on_progress)
+    assert res.indexes_processed == 2
+    assert res.documents_deleted == 4
+    assert events.count("index_start") == 2
+    assert events.count("index_done") == 2
+    # Each index frames its inner events: start … collected … deleted… … done … done
+    # (the inner purge's final "done" + our "index_done"; order may interleave).
+    assert events[0] == "index_start"
+
+
 def test_iter_documents_max_pages_caps_runaway_server() -> None:
     """If a server mis-reports has_more=True forever, iter_documents must raise
     rather than hang."""

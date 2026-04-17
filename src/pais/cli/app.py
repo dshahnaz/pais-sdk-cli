@@ -329,9 +329,16 @@ def kb_purge(
     _confirm(f"purge all documents under KB {kb_id}?", yes=yes)
 
     def go() -> None:
+        from pais.cli._purge_progress import purge_progress
+
         with _client() as c:
             kb_uuid = _resolve_kb(c, kb_id)
-            res = c.knowledge_bases.purge(kb_uuid, strategy=strategy)  # type: ignore[arg-type]
+            with purge_progress(output=output) as on_progress:
+                res = c.knowledge_bases.purge(
+                    kb_uuid,
+                    strategy=strategy,  # type: ignore[arg-type]
+                    on_progress=on_progress,
+                )
             render(
                 {
                     "indexes_processed": res.indexes_processed,
@@ -489,9 +496,17 @@ def index_purge(
     _confirm(f"purge all documents in index {index_ref}?", yes=yes)
 
     def go() -> None:
+        from pais.cli._purge_progress import purge_progress
+
         with _client() as c:
             kb_uuid, idx_uuid = _resolve_index(c, kb_ref, index_ref)
-            res = c.indexes.purge(kb_uuid, idx_uuid, strategy=strategy)  # type: ignore[arg-type]
+            with purge_progress(output=output) as on_progress:
+                res = c.indexes.purge(
+                    kb_uuid,
+                    idx_uuid,
+                    strategy=strategy,  # type: ignore[arg-type]
+                    on_progress=on_progress,
+                )
             render(asdict(res), fmt=output)
             if res.new_index_id:
                 typer.echo(

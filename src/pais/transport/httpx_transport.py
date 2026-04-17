@@ -21,6 +21,12 @@ _log = get_logger("pais.transport")
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 _CHAT_PATH_MARKER = "/chat/completions"
 
+# Process-local set of base URLs for which we've already emitted a
+# `pais.tls.verification_disabled` warning. Prevents the same line from
+# spamming the terminal every time a new `HttpxTransport` is constructed
+# inside one interactive session.
+_warned_tls_off: set[str] = set()
+
 
 class HttpxTransport:
     def __init__(
@@ -49,11 +55,15 @@ class HttpxTransport:
         self._total_timeout = total_timeout
 
         if not verify_ssl:
-            _log.warning(
-                "pais.tls.verification_disabled",
-                base_url=self.base_url,
-                note="self-signed certificates accepted; do not use in production-internet",
-            )
+            # Warn once per unique base_url per process — subsequent transports
+            # pointing at the same host don't need to repeat the advisory.
+            if self.base_url not in _warned_tls_off:
+                _log.warning(
+                    "pais.tls.verification_disabled",
+                    base_url=self.base_url,
+                    note="self-signed certificates accepted; do not use in production-internet",
+                )
+                _warned_tls_off.add(self.base_url)
             # Suppress urllib3 warning spam (users often re-vendor it).
             try:
                 import urllib3
