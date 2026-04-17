@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2 · `agent create` KB→index picker cascade; hidden-param OptionInfo leak
+
+### Fixed
+
+- **Interactive `pais agent create` now shows a live KB picker followed by an index picker, instead of a raw text prompt.** Previously, because `agent create` has no `kb_ref` parameter, `pick_index` tripped its "kb_ref not yet chosen" fallback and dropped the user into `? type the index alias or UUID:`. The picker now cascades — when no KB is in scope it calls `pick_kb` first, stashes the pick in the shared `PickerContext.answers`, and then lists indexes under it. `pick_or_create_index` does the same against `pick_or_create_kb` and propagates `← back` / `+ create new` cleanly.
+- The fix is applied *inside* the pickers, so any future command that binds an index picker without a preceding KB parameter (e.g. a hypothetical `agent update --index-id`) inherits the cascade automatically.
+- **Hidden params no longer leak `typer.OptionInfo` into callbacks.** The interactive dispatcher skipped `hidden=True` params entirely, so they weren't added to the `answers` dict — and `spec.callback(**answers)` fell back to the function's declared default, which is the raw `typer.Option(None, …)` `OptionInfo` wrapper. In `agent create`, the legacy `--kb-search-tool` (hidden) tripped `if kb_search_tool:` (always truthy on an `OptionInfo`) and crashed with `ToolLink.tool_id: Input should be a valid string [input_type=OptionInfo]`. The dispatcher now injects the hidden param's declared default (here `None`) into `answers` before calling the callback — matching the pattern already used for destructive `yes`.
+
 ## 0.7.1 · `agent create` doc-aligned; survive undocumented MCP endpoint
 
 ### Fixed

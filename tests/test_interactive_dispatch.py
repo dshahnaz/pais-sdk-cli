@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from pais.cli import _alias, _landing, _pickers, interactive
+from pais.cli import _alias, _landing, _pickers, _prompts, interactive
 from pais.cli._introspect import walk
 from pais.cli.app import app
 from pais.client import PaisClient
@@ -56,6 +56,7 @@ def fake_q(monkeypatch: pytest.MonkeyPatch) -> _FakeQuestionary:
     monkeypatch.setattr(interactive, "questionary", fq)
     monkeypatch.setattr(_pickers, "questionary", fq)
     monkeypatch.setattr(_landing, "questionary", fq)
+    monkeypatch.setattr(_prompts, "questionary", fq)
     return fq
 
 
@@ -126,6 +127,80 @@ def test_quit_exits_immediately(fake_q: _FakeQuestionary, isolated_cache: None) 
     interactive.enter_interactive(app)
     # Two select calls: landing + flat menu.
     assert len([c for c in fake_q.calls if c["kind"] == "select"]) == 2
+
+
+def test_agent_create_flow_picks_kb_then_index(
+    fake_q: _FakeQuestionary,
+    isolated_cache: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`agent create` has no `kb_ref` parameter. The index_id picker must
+    cascade into a KB pick first, then an index pick under that KB — not
+    fall through to a free-text prompt. The resolved index UUID must reach
+    the callback (not the raw menu title)."""
+    from rich.console import Console
+
+    from pais.cli._workflows import _base as _workflows_base
+    from pais.cli.interactive import _dispatch
+
+    # Seed a KB + index in a shared store.
+    store = Store()
+    seed_client = PaisClient(FakeTransport(store))
+    kb = seed_client.knowledge_bases.create(KnowledgeBaseCreate(name="kb-agent"))
+    ix = seed_client.indexes.create(
+        kb.id,
+        IndexCreate(name="ix-agent", embeddings_model_endpoint="BAAI/bge-small-en-v1.5"),
+    )
+
+    def _build(_self: Any) -> PaisClient:
+        return PaisClient(FakeTransport(store))
+
+    monkeypatch.setattr(Settings, "build_client", _build)
+    # The optional-review screen lives in _workflows._base; patch its questionary too.
+    monkeypatch.setattr(_workflows_base, "questionary", fake_q)
+
+    # Locate the agent-create spec and intercept its callback.
+    specs = walk(app)
+    spec = next(s for s in specs if s.path == ("agent", "create"))
+    captured: dict[str, Any] = {}
+
+    def _recorder(**kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    spec.callback = _recorder  # type: ignore[misc]
+
+    # Script the dispatch flow in order:
+    #   1. text  — name
+    #   2. select — chat model picker
+    #   3. select — cascaded KB picker (kb_ref absent → pick_kb fires)
+    #   4. select — index picker under picked KB
+    #   5. select — optional-review screen → ✅ Go
+    fake_q.script(
+        "my-agent",
+        "openai/gpt-oss-120b-4x  ·  VLLM",
+        f"—  kb-agent  ({kb.id})",
+        f"—  ix-agent  (status=AVAILABLE, docs=—, id={ix.id})",
+        "✅ Go (commit)",
+    )
+
+    _dispatch(spec, Settings(), Console())
+
+    assert captured.get("index_id") == ix.id, "resolved index UUID must reach the callback"
+    assert captured.get("name") == "my-agent"
+
+    selects = [c for c in fake_q.calls if c["kind"] == "select"]
+    assert "chat model" in selects[0]["message"].lower()
+    assert "Pick a KB" in selects[1]["message"]
+    assert "under" in selects[2]["message"], "index picker must be scoped by the picked KB"
+    # And explicitly: no free-text prompt for index_id.
+    texts = [c for c in fake_q.calls if c["kind"] == "text"]
+    assert not any("index alias or UUID" in t["message"] for t in texts)
+
+    # Hidden `kb_search_tool` must reach the callback as its declared default
+    # (None), NOT as typer's raw OptionInfo wrapper — otherwise the `if
+    # kb_search_tool:` branch in agent_create trips and pydantic blows up on
+    # ToolLink(tool_id=<OptionInfo>).
+    assert captured.get("kb_search_tool") is None
 
 
 def test_picker_status_label_lookup(fake_q: _FakeQuestionary, isolated_cache: None) -> None:
