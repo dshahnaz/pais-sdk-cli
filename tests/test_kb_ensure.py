@@ -40,7 +40,7 @@ def _cfg(tmp_path: Path) -> tuple:
               chunk_overlap = 64
 
                 [profiles.default.knowledge_bases.kb1.indexes.splitter]
-                kind = "test_suite_md"
+                kind = "test_suite_bge"
 
               [[profiles.default.knowledge_bases.kb1.indexes]]
               alias = "raw"
@@ -48,7 +48,7 @@ def _cfg(tmp_path: Path) -> tuple:
               embeddings_model_endpoint = "BAAI/bge-small-en-v1.5"
 
                 [profiles.default.knowledge_bases.kb1.indexes.splitter]
-                kind = "passthrough"
+                kind = "test_suite_arctic"
             """
         )
     )

@@ -27,6 +27,12 @@ class SplitterMeta:
     Surfaced by `pais splitters list`/`show`, the interactive picker, and
     workflow B's pre-ingest brief — so users pick the right splitter without
     reading source.
+
+    The `target_embeddings_model` / `suggested_index_chunk_size` /
+    `suggested_index_chunk_overlap` fields let a splitter declare the index
+    config it was tuned for. The CLI renders them in `splitters show` and
+    uses them for pre-flight checks in `pais ingest run` and `pais kb ensure`
+    (mismatch between splitter target and index config → warning).
     """
 
     summary: str  # one-line tagline (≤ 70 chars)
@@ -37,6 +43,9 @@ class SplitterMeta:
     token_char_hint: str | None  # e.g. "≈ 4 chars/token (English, BAAI/bge-small-en-v1.5)"
     example_input: str  # one-line example
     notes: tuple[str, ...] = ()  # caveats, limits
+    target_embeddings_model: str | None = None  # e.g. "BAAI/bge-small-en-v1.5"
+    suggested_index_chunk_size: int | None = None  # tokens
+    suggested_index_chunk_overlap: int | None = None  # tokens
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +57,9 @@ class SplitterMeta:
             "token_char_hint": self.token_char_hint,
             "example_input": self.example_input,
             "notes": list(self.notes),
+            "target_embeddings_model": self.target_embeddings_model,
+            "suggested_index_chunk_size": self.suggested_index_chunk_size,
+            "suggested_index_chunk_overlap": self.suggested_index_chunk_overlap,
         }
 
 

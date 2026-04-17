@@ -1,40 +1,22 @@
-# Ingestion (v0.4+)
+# Ingestion (v0.7.0)
 
 `pais ingest <kb_ref>:<index_ref> <path>` is the generic data-feed command. It looks up the splitter declared on the target index in your TOML config (or `--splitter <kind>` for one-off use), runs that splitter over `path` (file or directory), and uploads the resulting chunks to PAIS.
 
+v0.7.0 is a **breaking simplification**: the generic splitters (`passthrough`, `text_chunks`, `markdown_headings`, `test_suite_md`) were removed. The built-in surface is now two test-suite splitters tuned to the user's PAIS embedding models. If you need a different splitter shape, run `pais splitters new <kind>` to scaffold one.
+
 ## Splitter registry (built-ins)
 
-| kind | summary | input | typical chunk |
-|---|---|---|---|
-| `test_suite_md` | Atomic per-section split for H1/H2/H3 test-suite markdown | structured markdown (H1=suite, H2=section, H3=subsection) | ≈ 400 tokens (~1.5 KB English) |
-| `markdown_headings` | Generic markdown split at a configurable heading level | any markdown with headings | variable — one chunk per H2 (or H3) |
-| `passthrough` | Upload each file as-is; PAIS handles all splitting | any file (binary OK) | = file size (1 chunk per file) |
-| `text_chunks` | Sliding character window with configurable overlap | any UTF-8 text (logs, plain text) | 1500 chars (≈ 375 tokens English) with 100-char overlap |
+| kind | summary | target embeddings model | chunk_size | chunk_overlap |
+|---|---|---|---|---|
+| `test_suite_bge` | Per-test-case chunks with breadcrumb; tuned for bge-small-en-v1.5 | `BAAI/bge-small-en-v1.5` | 512 | 64 |
+| `test_suite_arctic` | Per-test-case chunks with breadcrumb; tuned for arctic-embed-m-v2.0 | `Snowflake/snowflake-arctic-embed-m-v2.0` | 2048 | 256 |
+<!-- splitters-table-end -->
 
-> The table above is **mirrored from `meta` declared on each splitter class** (`src/pais/ingest/splitters/<kind>.py`). When the in-code `meta` changes, this doc should be updated to match — a v0.7 follow-up will generate the table directly from `meta` at build time.
+Both splitters emit the same chunk format and filename convention. What differs is the **per-chunk token budget** (400 for bge, 1500 for arctic) and the recommended index `chunk_size` / `chunk_overlap`. Pick the variant that matches your index's `embeddings_model_endpoint`.
 
-### Inspect from the CLI (the source of truth)
+## The problem the test-suite splitters solve
 
-```bash
-pais splitters list                        # compact: kind + summary
-pais splitters list -v                     # adds input + chunk_size + unit
-pais splitters show <kind>                 # rich panel: input/algorithm/output/options/notes
-pais splitters preview <kind> <path>       # dry-run: chunk count + token & char distribution
-                                           # + measured chars/token ratio for YOUR content
-                                           # + first 300 chars of chunk #1 as a sample
-```
-
-`pais splitters preview` answers "how would this splitter chop my file?" without uploading anything. It uses `BAAI/bge-small-en-v1.5` for token counts (the default PAIS embedding model).
-
-Splitters live under `src/pais/ingest/splitters/` and self-register via the `@register_splitter` decorator. Each new splitter must declare a `meta: ClassVar[SplitterMeta]` so it shows up correctly in the CLI + interactive shell.
-
-## Why `test_suite_md` exists (the original use case)
-
-Each suite file is highly structured markdown:
-
-## The problem
-
-Each suite file is highly structured markdown:
+Test-suite markdown files are highly structured:
 
 ```
 # SuiteName
@@ -42,149 +24,154 @@ Each suite file is highly structured markdown:
 ## Test Coverage
    ### testCaseOne
    ### testCaseTwo
-   …
+   ...
 ## Technology Stack
 ```
 
-An agent on top of the KB must answer three kinds of questions:
+An agent querying the KB must answer three kinds of questions:
 
 1. "What does `testEditUserRole` validate?" → wants **one test-case section**
-2. "Which suite tests role creation?" → wants a **suite name**
+2. "Which suite tests role creation?" → wants a **suite-level overview**
 3. "Which tests depend on `createObjectScopeTest`?" → wants sections mentioning that name
 
-One-size chunking hurts all three. Sentence-splitting a whole suite bleeds test-case boundaries into neighbours; a coarse chunk mixes multiple unrelated tests.
+### Two layers of chunking
 
-## The solution: per-section atomic files
+Context can be lost twice:
 
-The splitter decomposes each suite file into **one file per logical section**:
+| Layer | Where | What |
+|---|---|---|
+| A | our splitter (client-side) | Slices the `.md` into `SplitDoc`s (uploaded documents) |
+| B | PAIS index (server-side) | Further slices each upload at `chunk_size` tokens with overlap |
 
-```
-Access-Management__05_overview__overview.md
-Access-Management__10_test__testGetAllRoles.md
-Access-Management__10_test__testCreateUserRole.md
-…
-Access-Management__20_tech_stack__tech_stack.md
-```
+If Layer B splits a test case mid-body, the bottom half becomes a naked `**Key Operations**: - ...` fragment with no suite or case identifier — the embedding vector loses the `Access-Management / testCreateUserRole` anchor and retrieval misses. **The splitter's job is to emit pre-sized, self-identifying chunks that survive Layer B.**
 
-Each emitted file has a **breadcrumb header** prepended:
+### The solution: atomic per-case chunks with breadcrumb
+
+Each emitted chunk looks like:
 
 ```markdown
 # Suite: Access-Management
-## Section: testEditUserRole
-## Kind: test
+# Testbed: vrops-1slice-config-ph | Components: Ops, VIDB
 
-[original section body]
+### testCreateUserRole
+
+**Purpose**: Tests the creation of a new user-defined role...
+
+**Dependencies**: Depends on `testGetAllRoles`
+
+**Validations**:
+- Confirms successful role creation via the createUserRole API
+- ...
 ```
 
-Every chunk PAIS returns carries the suite name and the section name *in its text*, regardless of which split it is. That's the retrieval signal.
+The breadcrumb is **≤ 60 tokens** — keeps total chunk size under the index's `chunk_size`, so Layer B doesn't re-split it. The breadcrumb lives **inside the chunk body** (not in metadata) because PAIS indexes only preserve `origin_name`; everything else must be in the text for the embedding to capture it.
 
-## Why 400 tokens, not 512
+### Optional: Anthropic contextual retrieval
 
-The PAIS index is configured with `chunk_size: 512` **tokens** (not chars — documented behavior). The splitter's hard cap is **400 tokens** per emitted file, measured with the exact tokenizer the index uses (`BAAI/bge-small-en-v1.5` via HuggingFace `tokenizers`). That leaves a 112-token (22%) cushion against tokenizer variance. Real-world distribution on `Access-Management.md`:
+Both splitters accept `with_context_llm = true` (TOML) or `--with-context-llm` (CLI). When enabled, each chunk gets a one-sentence LLM-generated description of its role in the document, prepended under the breadcrumb. This is the [Anthropic contextual-retrieval technique](https://www.anthropic.com/news/contextual-retrieval) — 49 % fewer retrieval failures in Anthropic's benchmarks, at a cost of one Claude Haiku call per chunk with prompt caching (~$1-3 for 300 suites).
 
-```
-13 sections total
-min=115  p50≈175  max=254  (budget=400)
-```
-
-Every section comfortably fits in one chunk.
-
-## What happens when a section exceeds 400 tokens
-
-Rare in practice, but handled:
-
-1. **Paragraph split** — section body split at blank lines, greedily packed into groups each fitting the budget. Each group becomes `…__part1.md`, `…__part2.md`, etc., each re-prefixed with the same breadcrumb.
-2. **Sentence split** — fallback when a single paragraph alone overflows.
-3. **`SectionTooLargeError`** — raised if a single indivisible sentence still exceeds 400 tokens. Indicates malformed input.
-
-## Three-layer token validation
-
-1. **Splitter-internal** — `src/pais/dev/split_suite.py` calls `token_count()` on every `rendered` file before returning. Over-budget → sub-split and re-measure.
-2. **Unit test** — `tests/test_split_suite.py::test_every_emitted_section_fits_budget` asserts every emitted section ≤ 400 tokens. CI-blocking.
-3. **Ingest-time re-check** — `ingest_file()` calls `_guard_budget()` before uploading. Belt-and-suspenders protection against a dev path that bypassed the splitter.
-
-Optional 4th layer: when `~/Downloads/Access-Management.md` exists, `tests/test_split_suite.py::test_real_access_management_fixture` runs the same checks on the real file and prints the token distribution.
-
-## Pipeline
-
-```
-┌────────────────┐   ┌───────────────┐   ┌─────────────────┐   ┌──────────┐
-│  300 .md files │──▶│  splitter     │──▶│ ~3,600 section  │──▶│  PAIS    │
-│  one per suite │   │  (pais.dev.   │   │ files           │   │  KB      │
-│                │   │   split_suite)│   │ (header +       │   │  + index │
-└────────────────┘   └───────────────┘   │  origin_name)   │   │          │
-                                         └─────────────────┘   └──────────┘
-                                                  │                  ▲
-                                                  ▼                  │
-                                         ┌─────────────────┐         │
-                                         │ batch uploader  │─────────┘
-                                         │ ThreadPool x 4  │
-                                         │ → report.json   │
-                                         └─────────────────┘
-```
+Install the extra: `pip install 'pais-sdk-cli[contextual]'` and export `ANTHROPIC_API_KEY`.
 
 ## Filename convention
 
 ```
-<SuiteName>__<order>_<kind>__<SectionSlug>[__partN].md
-
-order:  05=overview   10=test   20=tech_stack
-kind:   overview | test | tech_stack
+<SuiteSlug>__<order:02d>__<SectionSlug>[__pN].md
 ```
 
-- `SuiteName`: verbatim H1 title with non-`[A-Za-z0-9_-]` chars replaced by `_`.
-- `SectionSlug`: same sanitization applied to the H3 title.
-- `partN` appended only when a section was sub-split.
-- Lexicographic sort of filenames matches reading order.
+- `<SuiteSlug>`: H1 title with non-`[A-Za-z0-9_-]` chars collapsed to `-`.
+- `<order>`: `00` for the overview chunk, then `01`, `02`, ... for test cases in source order.
+- `<SectionSlug>`: `overview` for the overview chunk, otherwise the test-case H3 slug.
+- `__pN`: only when a single test case exceeded the token budget and was sub-split.
 
-The filename becomes `origin_name` in PAIS — the only durable metadata channel the API exposes.
+`group_key = "<SuiteSlug>__"` — `pais ingest --replace` deletes all prior chunks for a suite before re-uploading. Untouched suites stay.
 
-## Batch upload behavior
+## Inspect + preview from the CLI
 
-- Walks `<root>` recursively for `*.md`.
-- `--workers N` threads (default 4). Conservative for a single-node internal PAIS; tuneable up to 32.
-- Per-suite failures are logged into `ingest-report.json` but don't stop the run.
-- 5xx retries are handled by the existing SDK transport (exponential backoff + jitter).
-- Report includes global token-count distribution (`min / p50 / p95 / max`) across all emitted sections.
+```bash
+pais splitters list                                          # compact: kind + summary
+pais splitters list -v                                       # adds input + chunk_size + unit
+pais splitters show test_suite_bge                           # full meta + options + suggested index config
+
+# Dry-run preview — shows distribution + suggested index config, no upload
+pais splitters preview test_suite_bge ~/suites/foo.md
+
+# Preview + dump every chunk to disk so you can open and eyeball each one
+pais splitters preview test_suite_bge ~/suites/foo.md --dump /tmp/preview
+
+# Preview + print each chunk header + first 200 chars to stdout
+pais splitters preview test_suite_bge ~/suites/foo.md --show-all
+```
+
+`pais splitters show <kind>` and `preview` both display a **Recommended index config for this splitter** footer with the exact `embeddings_model_endpoint`, `chunk_size`, and `chunk_overlap` that splitter was tuned for. Use these values when creating the index.
+
+## Pre-flight check at ingest time
+
+When `pais ingest` runs, it compares the splitter's recommended config against the target index and emits a warning (non-blocking) if they disagree:
+
+- `splitter 'test_suite_bge' targets embeddings_model='BAAI/bge-small-en-v1.5' but the index uses 'Snowflake/snowflake-arctic-embed-m-v2.0' - retrieval quality may degrade`
+- `index chunk_size=256 is smaller than the splitter's recommended 512 - chunks may be re-split mid-body, losing breadcrumb context`
+
+The ingest still runs; the warning is there to catch the common mistake of pointing the wrong splitter at an index before retrieval quality tells you.
+
+## Scaffold a new splitter — `pais splitters new <kind>`
+
+```bash
+pais splitters new widget_html
+# Prompts:
+#   One-line summary (≤ 70 chars): Chunks Widget HTML docs at <section> boundaries
+#   Input type: widget HTML files
+#   Example input path: ~/widgets/foo.html
+#   Chunk size unit (tokens/chars/file) [tokens]:
+#   Target embeddings model (blank to skip): BAAI/bge-small-en-v1.5
+#   Suggested index chunk_size (tokens): 512
+#   Suggested index chunk_overlap (tokens): 64
+#
+# Writes:
+#   src/pais/ingest/splitters/widget_html.py    (skeleton with TODO markers)
+#   tests/test_splitter_widget_html.py          (registration + meta stubs)
+#   updates src/pais/ingest/splitters/__init__.py (adds the import)
+#   appends a row to docs/ingestion.md          (via <!-- splitters-table-end -->)
+```
+
+Use `--dry-run` to preview the generated files without writing. Use `--yes` to overwrite existing files.
+
+## TOML config
+
+```toml
+[profiles.default.knowledge_bases.test_suites]
+name = "test-suites-kb"
+
+  [[profiles.default.knowledge_bases.test_suites.indexes]]
+  alias = "main"
+  name = "test-suites-index"
+  embeddings_model_endpoint = "BAAI/bge-small-en-v1.5"
+  chunk_size = 512
+  chunk_overlap = 64
+
+    [profiles.default.knowledge_bases.test_suites.indexes.splitter]
+    kind = "test_suite_bge"
+    # Optional:
+    # max_case_tokens = 400
+    # emit_overview_chunk = true
+    # with_context_llm = false
+    # context_llm_model = "claude-haiku-4-5-20251001"
+```
+
+Running `pais ingest test_suites:main ~/suites/ --replace` walks every `.md` under `~/suites/`, splits, and uploads.
 
 ## Re-ingest cleanly with `--replace`
 
-PAIS does not dedupe on `origin_name`, so a plain re-ingest produces duplicates. Use the `--replace` flag:
-
-```bash
-pais-dev ingest-suites ./suites/ --kb kb_xxx --index idx_yyy --replace
-```
-
-For each suite file, the ingester:
-1. Computes the suite slug from its H1 title (same algorithm the splitter uses).
-2. Lists existing documents in the index and deletes only those whose `origin_name` starts with `<slug>__`.
-3. Uploads the freshly split sections.
-
-**Untouched suites stay**, so you can re-ingest only the files that changed. See [README cleanup section](../README.md#cleanup--cancel) for related ops (`kb purge`, `index purge`, `index cancel`) that share the same `--strategy {auto,api,recreate}` semantics.
+For each file, the ingester:
+1. Computes `group_key = "<SuiteSlug>__"`.
+2. Deletes existing documents in the index whose `origin_name` starts with that prefix.
+3. Uploads the freshly split chunks.
 
 **Caveat**: `--replace` requires PAIS to expose `DELETE /documents/{id}`. If your deployment doesn't, the ingester aborts with a clear error pointing you at `pais index purge --strategy recreate` (which drops + recreates the entire index, changing its id).
 
-## Troubleshooting
-
-**`ingest-report.json` shows failures**
-
-Open the report, look for the `errors` array on the failing suite entry. Common causes:
-
-- `SectionTooLargeError` → one section has a single sentence > 400 tokens. Reformat the source suite to break the sentence.
-- `PaisServerError / 5xx` → transient PAIS issue; rerun. Persistent → share `~/.pais/logs/pais.log` for triage (already redacted).
-- `ValueError: no H1 title found` → the suite file is missing the top-level `# SuiteName` line.
-
-**Token distribution looks wrong**
-
-Inspect the `token_distribution` footer of `ingest-report.json`. If `p95` is close to 400, the splitter is near its limit — suites are getting denser than expected. Lower the splitter's `BUDGET` constant to add more headroom, or adjust suite content.
-
-**Share logs with the maintainers**
-
-`~/.pais/logs/pais.log` is structured JSON with secrets redacted. Safe to paste verbatim. Each ingest run shares a single `request_id` across all its entries — grep for it to slice a single run out of the file.
-
 ## Related
 
-- API reference: `src/pais/dev/split_suite.py`, `src/pais/dev/ingest.py`
-- CLI: `pais-dev split-suite`, `pais-dev ingest-suite`, `pais-dev ingest-suites`
-- Tests: `tests/test_split_suite.py`, `tests/test_ingest.py`, `tests/test_cli_dev.py`
-- Architecture overview: [`architecture.md`](architecture.md)
+- Splitter sources: `src/pais/ingest/splitters/{test_suite_bge,test_suite_arctic,_test_suite_core}.py`
+- Scaffolder: `src/pais/cli/splitters_new_cmd.py`
+- Preview: `src/pais/cli/_splitter_preview.py`
+- Tests: `tests/test_splitter_test_suite_core.py`, `tests/test_splitter_test_suite_bge.py`, `tests/test_splitter_test_suite_arctic.py`, `tests/test_splitter_preview.py`, `tests/test_splitters_new_cmd.py`
+- Architecture: [`architecture.md`](architecture.md)

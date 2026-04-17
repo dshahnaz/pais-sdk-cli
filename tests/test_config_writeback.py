@@ -43,14 +43,14 @@ def test_index_block_round_trips_through_loader(tmp_path: Path) -> None:
         embeddings_model_endpoint="BAAI/bge-small-en-v1.5",
         chunk_size=512,
         chunk_overlap=64,
-        splitter_kind="passthrough",
+        splitter_kind="test_suite_bge",
         splitter_options={},
     )
     commit_append(p, kb_block, ix_block)
     cfg, _, _ = load_profile_config(path=p, profile="lab")
     assert cfg.knowledge_bases["demo"].indexes[0].name == "ix"
     assert cfg.knowledge_bases["demo"].indexes[0].splitter is not None
-    assert cfg.knowledge_bases["demo"].indexes[0].splitter.kind == "passthrough"
+    assert cfg.knowledge_bases["demo"].indexes[0].splitter.kind == "test_suite_bge"
 
 
 def test_block_exists_idempotency_check(tmp_path: Path) -> None:

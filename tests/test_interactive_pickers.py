@@ -136,13 +136,13 @@ def test_pick_splitter_kind_lists_registry(fake_q: _FakeQuestionary) -> None:
 
     def _select(message: str, *, choices: list[Any], **_: Any) -> _FakeAsk:
         captured.extend(choices)
-        return _FakeAsk("test_suite_md")
+        return _FakeAsk("test_suite_bge")
 
     fake_q.select = _select  # type: ignore[method-assign]
     result = pick_splitter_kind(ctx)
-    assert result == "test_suite_md"
-    # All four built-in splitters appear.
-    for kind in ("test_suite_md", "passthrough", "markdown_headings", "text_chunks"):
+    assert result == "test_suite_bge"
+    # Both built-in splitters appear.
+    for kind in ("test_suite_bge", "test_suite_arctic"):
         assert kind in captured
 
 

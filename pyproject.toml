@@ -1,6 +1,6 @@
 [project]
 name = "pais-sdk-cli"
-version = "0.6.8"
+version = "0.7.0"
 description = "Contract-first Python SDK + CLI for VMware Private AI Service (PAIS), with mock server for offline development"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 keyring = ["keyring>=24.0"]
+contextual = ["anthropic>=0.40"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -88,6 +89,10 @@ files = ["src/pais", "src/pais_mock"]
 [[tool.mypy.overrides]]
 module = ["pais.cli.*"]
 strict = false
+
+[[tool.mypy.overrides]]
+module = ["anthropic", "anthropic.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"

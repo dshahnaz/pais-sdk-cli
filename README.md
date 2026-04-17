@@ -4,17 +4,20 @@ Contract-first Python SDK + CLI for **VMware Private AI Service (PAIS)**, with a
 
 ## Install
 
-Not on PyPI yet — install straight from GitHub. Both the `pais` and `pais-dev` commands are wired as console scripts and land on your `PATH`.
+Not on PyPI yet — install straight from GitHub. The `pais` command is the console script.
 
 ```bash
 # pip — latest main
 pip install "git+https://github.com/dshahnaz/pais-sdk-cli.git"
 
 # pip — pinned to a tag/commit (recommended for reproducibility)
-pip install "git+https://github.com/dshahnaz/pais-sdk-cli.git@v0.1.0"
+pip install "git+https://github.com/dshahnaz/pais-sdk-cli.git@v0.7.0"
 
-# pip — include dev extras (adds the HuggingFace tokenizers dep needed by `pais-dev`)
+# pip — include dev extras (adds the HuggingFace tokenizers dep required by the test-suite splitters)
 pip install "git+https://github.com/dshahnaz/pais-sdk-cli.git#egg=pais-sdk-cli[dev]"
+
+# pip — with optional contextual-retrieval extra (Anthropic SDK for --with-context-llm)
+pip install "git+https://github.com/dshahnaz/pais-sdk-cli.git#egg=pais-sdk-cli[dev,contextual]"
 
 # uv — into an isolated tool environment (recommended for CLI users)
 uv tool install "git+https://github.com/dshahnaz/pais-sdk-cli.git"
@@ -28,7 +31,6 @@ Verify:
 
 ```bash
 pais --help
-pais-dev --help
 ```
 
 For local development (clone + editable install) see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -196,16 +198,18 @@ data_origin_type = "LOCAL_FILES"
   chunk_overlap = 64
 
     [profiles.lab.knowledge_bases.test_suites.indexes.splitter]
-    kind = "test_suite_md"   # H1/H2/H3 atomic sections + breadcrumb header
-    budget_tokens = 400
+    kind = "test_suite_bge"   # per-test-case chunks + breadcrumb; 400-tok budget
+    max_case_tokens = 400
 
   [[profiles.lab.knowledge_bases.test_suites.indexes]]
-  alias = "raw"
-  name = "ts-raw"
-  embeddings_model_endpoint = "BAAI/bge-small-en-v1.5"
+  alias = "arctic"
+  name = "ts-arctic"
+  embeddings_model_endpoint = "Snowflake/snowflake-arctic-embed-m-v2.0"
+  chunk_size = 2048
+  chunk_overlap = 256
 
     [profiles.lab.knowledge_bases.test_suites.indexes.splitter]
-    kind = "passthrough"     # upload files as-is; PAIS handles splitting
+    kind = "test_suite_arctic"  # wider 1500-tok budget for Arctic's 8 K window
 ```
 
 Then:
@@ -226,11 +230,11 @@ Generic `pais ingest` runs the splitter declared on the target index over any fi
 # 0. ensure the KB + index exist (one-time setup from config)
 pais --profile lab kb ensure
 
-# 1. ingest a directory of suite markdown files (uses test_suite_md splitter from config)
+# 1. ingest a directory of suite markdown files (uses test_suite_bge splitter from config)
 pais ingest test_suites:main ./suites/
 
-# 2. ingest some PDFs / plain text into the same KB but a different index
-pais ingest test_suites:raw ./pdfs/
+# 2. same files into an index backed by a different embedding model
+pais ingest test_suites:arctic ./suites/
 
 # 3. re-ingest only changed suites; other suites in the index stay
 pais ingest test_suites:main ./changed/ --replace
@@ -238,8 +242,8 @@ pais ingest test_suites:main ./changed/ --replace
 # 4. preview without uploading
 pais ingest test_suites:main ./suites/ --dry-run
 
-# 5. one-off override of the splitter
-pais ingest test_suites:main ./README.md --splitter markdown_headings
+# 5. one-off override of the splitter (pick the variant matching the index's embeddings model)
+pais ingest test_suites:main ./suites/ --splitter test_suite_arctic
 
 # 6. wait for indexing
 pais index wait test_suites:main
@@ -249,24 +253,24 @@ UUIDs work everywhere aliases do — `pais ingest <kb_uuid>:<idx_uuid> ./files/`
 
 ### Built-in splitters
 
-| kind | summary | input | typical chunk |
-|---|---|---|---|
-| `test_suite_md` | Atomic per-section split for H1/H2/H3 test-suite markdown | structured markdown (H1=suite, H2=section, H3=subsection) | ≈ 400 tokens (~1.5 KB English) |
-| `markdown_headings` | Generic markdown split at a configurable heading level | any markdown with headings | variable — one chunk per H2 (or H3) |
-| `passthrough` | Upload each file as-is; PAIS handles all splitting | any file (binary OK) | = file size (1 chunk per file) |
-| `text_chunks` | Sliding character window with configurable overlap | any UTF-8 text (logs, plain text) | 1500 chars (≈ 375 tokens English) with 100-char overlap |
+| kind | summary | target embeddings model | chunk_size | chunk_overlap |
+|---|---|---|---|---|
+| `test_suite_bge` | Per-test-case chunks with breadcrumb; tuned for bge-small-en-v1.5 | `BAAI/bge-small-en-v1.5` | 512 | 64 |
+| `test_suite_arctic` | Per-test-case chunks with breadcrumb; tuned for arctic-embed-m-v2.0 | `Snowflake/snowflake-arctic-embed-m-v2.0` | 2048 | 256 |
 
-Discover and inspect them from the CLI:
+Both emit 1 overview chunk + 1 chunk per test case, each with a compact 2-line breadcrumb prepended so retrieval can't lose the suite/case anchor. Pick the variant matching the index's `embeddings_model_endpoint`. See [`docs/ingestion.md`](docs/ingestion.md) for the full story (two-layer chunking, why the breadcrumb lives inside the body, optional Anthropic contextual retrieval).
+
+Inspect + preview from the CLI:
 ```bash
-pais splitters list                        # compact (kind + summary)
-pais splitters list -v                     # adds input + chunk size + unit
-pais splitters show test_suite_md          # rich panel: input/algorithm/output/options/notes
-pais splitters preview test_suite_md ~/Downloads/Access-Management.md
-                                           # dry-run: chunk count + size distribution
-                                           # in BOTH tokens and chars + sample chunk
+pais splitters list                                            # compact: kind + summary
+pais splitters show test_suite_bge                             # full meta + suggested index config
+pais splitters preview test_suite_bge ~/suites/foo.md          # stats + sample chunk
+pais splitters preview test_suite_bge ~/suites/foo.md --dump /tmp/preview   # writes every chunk to disk
+pais splitters preview test_suite_bge ~/suites/foo.md --show-all            # prints each chunk inline
+pais splitters new my_custom                                   # scaffold a new splitter
 ```
 
-The `preview` command is the fastest way to answer "how would this splitter chop my file?" before spending an upload.
+The `preview --dump <dir>/` flag is the fastest way to answer "will each of my 300 test suites chunk correctly?" — dump the first handful, open the files, verify the breadcrumbs + sizes, then bulk-ingest with confidence.
 
 **Content hygiene**: bodies are uploaded as-is. Scrub internal hostnames / IPs / credentials from input files before ingesting into a shared PAIS deployment — the structured logger redacts secret-looking *keys* but cannot sanitize arbitrary prose.
 
