@@ -44,9 +44,23 @@ def prompt_for_param(param: ParamSpec) -> Any:
     # 2. Literal[...] / Enum → select.
     choices = _enum_choices(param)
     if choices:
+        # Coerce Enum-typed defaults to their stringified form so `default in
+        # choices` works. Enum.__members__ is keyed by .name; Enum.value may
+        # be the same string or a different one — cover both.
+        default_key: Any = default
+        if default is not None and hasattr(default, "name"):
+            default_key = (
+                default.name
+                if default.name in choices
+                else (default.value if getattr(default, "value", None) in choices else None)
+            )
+        elif isinstance(default, str) and default not in choices:
+            default_key = None
         return _ok(
             questionary.select(
-                label, choices=choices, default=default if default in choices else None
+                label,
+                choices=choices,
+                default=default_key if default_key in choices else None,
             ).ask()
         )
 

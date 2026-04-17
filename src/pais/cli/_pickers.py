@@ -83,7 +83,12 @@ def pick_kb(ctx: PickerContext) -> Any:
     choices.append(_MANUAL)
     choices.append(_BACK)
 
-    pick = questionary.select("Pick a KB:", choices=choices, instruction=_BACK_HINT).ask()
+    pick = questionary.select(
+        "Pick a KB:",
+        choices=choices,
+        default=_first_selectable(choices),
+        instruction=_BACK_HINT,
+    ).ask()
     if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _MANUAL:
@@ -133,7 +138,10 @@ def pick_index(ctx: PickerContext) -> Any:
     choices.append(_BACK)
 
     pick = questionary.select(
-        f"Pick an index under {kb_ref}:", choices=choices, instruction=_BACK_HINT
+        f"Pick an index under {kb_ref}:",
+        choices=choices,
+        default=_first_selectable(choices),
+        instruction=_BACK_HINT,
     ).ask()
     if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
@@ -158,7 +166,12 @@ def pick_agent(ctx: PickerContext) -> Any:
     choices.append(_DIVIDER)
     choices.append(_MANUAL)
     choices.append(_BACK)
-    pick = questionary.select("Pick an agent:", choices=choices, instruction=_BACK_HINT).ask()
+    pick = questionary.select(
+        "Pick an agent:",
+        choices=choices,
+        default=_first_selectable(choices),
+        instruction=_BACK_HINT,
+    ).ask()
     if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
     if pick == _MANUAL:
@@ -170,9 +183,11 @@ def pick_splitter_kind(_ctx: PickerContext) -> Any:
     kinds = sorted(SPLITTER_REGISTRY)
     if not kinds:
         return _manual_fallback("no splitters registered; type a kind:")
+    default_kind = "recursive_markdown" if "recursive_markdown" in kinds else kinds[0]
     pick = questionary.select(
         "Pick a splitter kind:",
         choices=[*kinds, _DIVIDER, _MANUAL, _BACK],
+        default=default_kind,
         instruction=_BACK_HINT,
     ).ask()
     if pick is None or pick in (_BACK, _DIVIDER):
@@ -195,6 +210,7 @@ def pick_cached_alias(_ctx: PickerContext) -> Any:
     pick = questionary.select(
         "Pick a cached alias to clear:",
         choices=[*titles, _DIVIDER, _MANUAL, _BACK],
+        default=titles[0] if titles else None,
         instruction=_BACK_HINT,
     ).ask()
     if pick is None or pick in (_BACK, _DIVIDER):
@@ -221,7 +237,10 @@ def pick_mcp_tool(ctx: PickerContext) -> Any:
     choices.append(_MANUAL)
     choices.append(_BACK)
     pick = questionary.select(
-        "Pick an MCP tool to link:", choices=choices, instruction=_BACK_HINT
+        "Pick an MCP tool to link:",
+        choices=choices,
+        default=_first_selectable(choices),
+        instruction=_BACK_HINT,
     ).ask()
     if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
@@ -314,7 +333,10 @@ def pick_or_create_kb(ctx: PickerContext) -> Any:
     choices.append(_BACK)
 
     pick = questionary.select(
-        "Pick a KB (or create new):", choices=choices, instruction=_BACK_HINT
+        "Pick a KB (or create new):",
+        choices=choices,
+        default=_first_selectable(choices, prefer_star=True),
+        instruction=_BACK_HINT,
     ).ask()
     if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
@@ -386,6 +408,7 @@ def pick_or_create_index(ctx: PickerContext) -> Any:
     pick = questionary.select(
         f"Pick an index under {kb_ref} (or create new):",
         choices=choices,
+        default=_first_selectable(choices, prefer_star=True),
         instruction=_BACK_HINT,
     ).ask()
     if pick is None or pick in (_BACK, _DIVIDER):
@@ -433,7 +456,10 @@ def pick_or_create_agent(ctx: PickerContext) -> Any:
     choices.append(_BACK)
 
     pick = questionary.select(
-        "Pick an agent (or create new):", choices=choices, instruction=_BACK_HINT
+        "Pick an agent (or create new):",
+        choices=choices,
+        default=_first_selectable(choices, prefer_star=True),
+        instruction=_BACK_HINT,
     ).ask()
     if pick is None or pick in (_BACK, _DIVIDER):
         return CANCEL
@@ -460,9 +486,14 @@ def pick_or_create_splitter_config(_ctx: PickerContext) -> Any:
         titles.append(title)
         value_for_title[title] = k
 
+    default_title = next(
+        (t for t in titles if t.startswith("recursive_markdown")),
+        titles[0] if titles else None,
+    )
     pick = questionary.select(
         "Pick a splitter kind:",
         choices=[*titles, _DIVIDER, _MANUAL, _BACK],
+        default=default_title,
         instruction=_BACK_HINT,
     ).ask()
     if pick is None or pick in (_BACK, _DIVIDER):
@@ -473,6 +504,25 @@ def pick_or_create_splitter_config(_ctx: PickerContext) -> Any:
 
 
 # ----- helpers ----------------------------------------------------------------
+
+
+def _first_selectable(choices: list[Any], *, prefer_star: bool = False) -> Any | None:
+    """Pick the first "real" entry in a choices list so questionary can
+    pre-highlight it. Skips dividers, and — unless `prefer_star` is requested
+    and a ★ item exists — also skips the trailing "+ create", "✏ manual",
+    "← back" action rows. Returns None if nothing sensible is found, which
+    leaves questionary's own default (first choice) in place."""
+    if prefer_star:
+        for c in choices:
+            if isinstance(c, str) and c.startswith("★"):
+                return c
+    for c in choices:
+        if not isinstance(c, str):
+            continue
+        if c in (_DIVIDER, _MANUAL, _CREATE, _BACK):
+            continue
+        return c
+    return None
 
 
 def _manual_fallback(prompt: str) -> Any:

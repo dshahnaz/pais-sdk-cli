@@ -124,3 +124,53 @@ def test_kb_purge_iterates_every_index() -> None:
     assert res.documents_deleted == 6
     for ix_id in ix_ids:
         assert c.indexes.list_documents(kb_id, ix_id).data == []
+
+
+def test_list_documents_paginates_via_cursor() -> None:
+    """Regression test for v0.6.6: purge used to stop at 100 docs because
+    list_documents made a single un-paginated GET. Verify the cursor contract."""
+    store = Store()
+    c = PaisClient(FakeTransport(store))
+    kb_id, [ix_id] = _provision(c)
+    _upload(c, kb_id, ix_id, [f"doc_{i:03d}.md" for i in range(250)])
+
+    # Single page at default limit=100 — only first 100 returned, has_more=True.
+    page1 = c.indexes.list_documents(kb_id, ix_id, limit=100)
+    assert len(page1.data) == 100
+    assert page1.has_more is True
+    assert page1.last_id is not None
+    assert page1.num_objects == 250
+
+    # iter_documents transparently walks every page.
+    all_docs = list(c.indexes.iter_documents(kb_id, ix_id, limit=100))
+    assert len(all_docs) == 250
+    assert {d.origin_name for d in all_docs} == {f"doc_{i:03d}.md" for i in range(250)}
+
+
+def test_purge_removes_every_document_across_pages() -> None:
+    """Regression test for the v0.6.5 bug: kb prune stopped at 100 docs."""
+    store = Store()
+    c = PaisClient(FakeTransport(store))
+    kb_id, [ix_id] = _provision(c)
+    _upload(c, kb_id, ix_id, [f"doc_{i:03d}.md" for i in range(250)])
+
+    res = c.indexes.purge(kb_id, ix_id, strategy="api")
+    assert res.strategy_used == "api"
+    assert res.documents_deleted == 250
+    assert res.errors == []
+    remaining = list(c.indexes.iter_documents(kb_id, ix_id))
+    assert remaining == []
+
+
+def test_iter_documents_max_pages_caps_runaway_server() -> None:
+    """If a server mis-reports has_more=True forever, iter_documents must raise
+    rather than hang."""
+    store = Store()
+    c = PaisClient(FakeTransport(store))
+    kb_id, [ix_id] = _provision(c)
+    _upload(c, kb_id, ix_id, ["a.md", "b.md"])
+
+    with pytest.raises(RuntimeError, match="max_pages"):
+        # Tiny limit + tiny cap — in a healthy server this would finish in 1 page,
+        # so 0 iterations trivially exceeds the cap.
+        list(c.indexes.iter_documents(kb_id, ix_id, limit=1, max_pages=0))

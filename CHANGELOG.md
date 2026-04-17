@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.6.6 · `kb prune` paginates, prompts default-selected, quieter by default
+
+### Fixed
+- **`pais kb prune` (and `pais kb purge`) stopped after 100 documents.** Root cause: `Indexes.list_documents()` made a single un-paginated `GET /documents` call, which most PAIS servers cap at 100 per page. Indexes with > 100 documents leaked every page beyond the first. Fix: new `Indexes.iter_documents(...)` transparently follows the `has_more` + `last_id` cursor envelope (same pattern the SDK already uses for KBs/indexes/agents via `Resource.list_all`). `purge` now snapshots every matching doc id up-front across all pages, then deletes — robust to cursor invalidation under concurrent delete. Hard cap (1000 pages) guards against a server mis-reporting `has_more=True` forever. 3 new tests in `test_cleanup` seed 250 docs and assert all are removed.
+
+### Changed — UX
+- **No more "customize --X?" yes/no gates.** The interactive shell's flat-command dispatcher used to ask *"customize --chunk-size (default: 512)?"* before every optional param. Gone. Instead, a single review-screen shows every optional param with its default pre-filled — press Enter on "Go" to run with all defaults, or pick "Edit X" to change one. Same pattern already powered `setup_agent` / `setup_kb` — now consistent everywhere.
+- **Search workflow no longer gates `top_n` / `similarity_cutoff`.** The *"Customize top_n / similarity_cutoff?"* confirm is removed; both fields are always visible in a review screen with defaults (`top_n=5`, `similarity_cutoff=0.0`). Enter = run.
+- **Every picker pre-highlights the recommended choice.** `pick_kb` / `pick_index` / `pick_agent` / `pick_mcp_tool` / `pick_splitter_kind` / the `pick_or_create_*` variants all thread `default=` into `questionary.select()`. For pick-or-create flows, the top ★ recent is pre-selected; `pick_splitter_kind` pre-selects `recursive_markdown`. Returning users hit Enter once instead of arrowing down.
+- **Review screen says so:** the action picker's instruction now reads `Enter = Go  ·  ↑↓ to pick  ·  Ctrl-C → back` and defaults to "✅ Go (commit)". `next_actions_menu` defaults to the recommended action.
+
+### Changed — Logs
+- **Silent by default; detail on `-v` / `-vv`.**
+  - no flag  → WARNING (only warnings/errors: TLS-verify-off, purge fallback, retries)
+  - `-v`     → INFO (high-signal events: ingest start/done, index recreated)
+  - `-vv`    → DEBUG (per-request HTTP traces, latency, status)
+  The `--verbose` option is now a count-style flag (`typer.Option(0, "--verbose", "-v", count=True)`). `PAIS_VERBOSE` env respects the tier (`"1"` = INFO, `"2"` = DEBUG).
+- **`pais.request` success lines demoted from INFO to DEBUG** in both `httpx_transport.py` and `fake_transport.py`. A ten-KB prune used to dump ~50 `pais.request` lines at INFO; now those appear only at `-vv`. Retries / timeouts / network errors stay at WARNING.
+- **Eager `configure_logging` in the Typer root callback** — the verbosity tier applies before the first HTTP request, not only after the first `PaisClient.from_settings` call.
+
+### Added
+- `Indexes.list_documents(..., *, limit=None, after=None)` — cursor pagination kwargs.
+- `Indexes.iter_documents(..., *, limit=100, max_pages=1000)` — page-walking iterator.
+- `pais_mock` GET `/documents` honours `?limit=N&after=<doc_id>`, returns `has_more` + `first_id` + `last_id` for multi-page listings.
+- `tests/test_verbosity.py` — locks in the three-tier contract + asserts `pais.request` success stays below INFO.
+- `tests/test_workflows_search.py` — regression test that the customize gate is gone.
+- `tests/test_cleanup.py` — 3 new pagination tests (seed 250, purge all; iter_documents walks every page; max_pages cap).
+
+### Migration notes
+- `Settings().log_level` now defaults to `"WARNING"` in the CLI context (via the root callback). If you embed the SDK, call `configure_logging(level="INFO")` yourself to keep the old floor.
+- If you relied on `pais.request` appearing in default stderr, switch to `pais -vv …` or read `~/.pais/logs/pais.log` directly.
+
 ## 0.6.5 · relax enum drift, surface logs, ship `pais doctor`
 
 ### Fixed

@@ -30,6 +30,15 @@ from rich.console import Console
 from pais.cli._introspect import CommandSpec, ParamSpec, walk
 from pais.cli._pickers import PickerContext, picker_for
 from pais.cli._prompts import CANCEL, prompt_for_param
+from pais.cli._workflows._base import (
+    BACK,
+    FieldSpec,
+    ReviewSpec,
+    prompt_review_screen,
+)
+from pais.cli._workflows._base import (
+    CANCEL as REVIEW_CANCEL,
+)
 from pais.config import Settings
 from pais.errors import PaisError
 
@@ -68,19 +77,20 @@ def enter_interactive(app: typer.Typer) -> None:
     console = Console()
     settings = Settings()
 
-    # Quiet by default; verbose env opts back into the configured level.
-    # Two-step:
+    # Respect the -v / -vv tier chosen in app.py's root callback. PAIS_VERBOSE
+    # is "1" for INFO, "2" for DEBUG, or absent for WARNING.
     #   1. Mutate `settings.log_level` so every subsequent `from_settings`
-    #      call inside the loop applies WARNING (not INFO).
-    #   2. Run `configure_logging` once now to take effect immediately —
-    #      before the first client is built (covers the TLS-warning window).
-    if not _os.environ.get("PAIS_VERBOSE"):
-        settings.log_level = "WARNING"
-        configure_logging(
-            level="WARNING",
-            log_file=settings.log_file,
-            json_console=settings.log_json_console,
-        )
+    #      call inside the loop applies the same floor.
+    #   2. Run `configure_logging` once now so logging takes effect before
+    #      the first client is built (covers the TLS-warning window).
+    _tier = _os.environ.get("PAIS_VERBOSE", "0")
+    _level = "WARNING" if _tier == "0" else ("INFO" if _tier == "1" else "DEBUG")
+    settings.log_level = _level
+    configure_logging(
+        level=_level,
+        log_file=settings.log_file,
+        json_console=settings.log_json_console,
+    )
 
     while True:
         try:
@@ -143,8 +153,18 @@ def _select_command(specs: list[CommandSpec]) -> CommandSpec | None:
 
 
 def _dispatch(spec: CommandSpec, settings: Settings, console: Console) -> None:
-    """Prompt for every parameter, confirm if destructive, then call the callback."""
+    """Prompt for every parameter, confirm if destructive, then call the callback.
+
+    Two-phase:
+      1. Required params and pickers are resolved inline — the user needs to
+         choose a KB, an index, an agent, etc. before anything else.
+      2. Optional params are shown together in one review screen with all
+         defaults pre-filled. Enter on "Go" runs with all defaults; "Edit X"
+         pops a prompt for just that one field. No more per-param
+         "customize --X?" yes/no gate.
+    """
     answers: dict[str, Any] = {}
+    optional_fields: list[tuple[ParamSpec, FieldSpec]] = []
 
     # Build a fresh client per dispatch so transport state is clean.
     with settings.build_client() as client:
@@ -156,11 +176,52 @@ def _dispatch(spec: CommandSpec, settings: Settings, console: Console) -> None:
             # prompt the user about it separately.
             if is_destructive and param.name == "yes":
                 continue
-            value = _resolve_param(spec, param, ctx)
-            if value is CANCEL:
+
+            picker = picker_for(spec.path, param.name)
+            if picker is not None:
+                value = picker(ctx)
+                if value is CANCEL:
+                    console.print("[dim]aborted; back to menu[/dim]\n")
+                    return
+                answers[param.name] = value
+                continue
+
+            if param.required:
+                value = prompt_for_param(param)
+                if value is CANCEL:
+                    console.print("[dim]aborted; back to menu[/dim]\n")
+                    return
+                answers[param.name] = value
+                continue
+
+            # Optional — collect for the review screen.
+            optional_fields.append(
+                (
+                    param,
+                    FieldSpec(
+                        name=param.name,
+                        value=param.default,
+                        hint=_hint_for(param),
+                        re_prompt=_reprompt_for(param),
+                    ),
+                )
+            )
+
+        if optional_fields:
+            review = ReviewSpec(
+                title=f"→ {spec.display} — options (Enter = run with defaults)",
+                fields=[fs for _, fs in optional_fields],
+            )
+            result = prompt_review_screen(review, console)
+            if result is REVIEW_CANCEL or result is BACK:
                 console.print("[dim]aborted; back to menu[/dim]\n")
                 return
-            answers[param.name] = value
+            assert isinstance(result, dict)
+            for param, fs in optional_fields:
+                # The re_prompt may have returned CANCEL for a specific field,
+                # which `prompt_review_screen` surfaces as unchanged value.
+                # Pass the current value through unchanged.
+                answers[param.name] = result.get(fs.name, param.default)
 
         if is_destructive:
             label = _confirmation_label(spec, answers)
@@ -183,24 +244,25 @@ def _dispatch(spec: CommandSpec, settings: Settings, console: Console) -> None:
     console.print()
 
 
-def _resolve_param(spec: CommandSpec, param: ParamSpec, ctx: PickerContext) -> Any:
-    """Use a context-aware picker if one is registered; else fall back to a
-    type-aware prompt. Optional params can be skipped with the default."""
-    picker = picker_for(spec.path, param.name)
-    if picker is not None:
-        return picker(ctx)
+def _hint_for(param: ParamSpec) -> str | None:
+    """One-line hint for the review screen — first line of the help text."""
+    if not param.help:
+        return None
+    return param.help.splitlines()[0].strip() or None
 
-    # Skip optional params unless the user opts in (less prompt fatigue).
-    if (
-        not param.required
-        and not questionary.confirm(
-            f"customize --{param.name.replace('_', '-')} (default: {param.default!r})?",
-            default=False,
-        ).ask()
-    ):
-        return param.default
 
-    return prompt_for_param(param)
+def _reprompt_for(param: ParamSpec):  # type: ignore[no-untyped-def]
+    """Return a callable the review screen invokes when the user picks
+    'Edit <name>'. Re-uses the type-aware `prompt_for_param` so widgets match
+    the param's annotation."""
+
+    def _go(_current: Any) -> Any:
+        val = prompt_for_param(param)
+        if val is CANCEL:
+            return _current
+        return val
+
+    return _go
 
 
 def _confirmation_label(spec: CommandSpec, answers: dict[str, Any]) -> str:

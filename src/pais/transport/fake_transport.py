@@ -70,7 +70,7 @@ class FakeTransport:
             headers=merged_headers,
         )
         resp_request_id = resp_headers.get("X-Request-ID") or request_id
-        _log.info(
+        _log.debug(
             "pais.request",
             method=method,
             path=path,

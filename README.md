@@ -90,7 +90,11 @@ Destructive ops use **type-to-confirm** (you type the resource name to proceed).
 **Navigation shortcuts**:
 - `Ctrl-C` / `Esc` → back to the previous step (or exit shell at the landing screen). Every prompt shows the hint inline.
 - `←  back` row in every picker — same effect as `Ctrl-C`, just clickable.
-- The shell defaults to **WARNING-level logs** so the menu stays readable. Pass `pais -v` (or `PAIS_VERBOSE=1`) for the full INFO stream when troubleshooting. The full log always still rotates to `~/.pais/logs/pais.log`.
+- **Verbosity tiers** (applies to both the shell and any `pais <cmd>` subcommand):
+  - no flag → `WARNING` — only warnings/errors (TLS-verify-off, purge fallback, retries). Silent happy path.
+  - `-v`  → `INFO` — high-signal events (ingest start/done, index recreated, etc.).
+  - `-vv` → `DEBUG` — per-request HTTP traces with latency + status.
+  The full log always rotates to `~/.pais/logs/pais.log` regardless of the tier you pick for stderr.
 
 ## Persistent config
 

@@ -137,14 +137,19 @@ def prompt_review_screen(spec: ReviewSpec, console: Console) -> dict[str, Any] |
                 table.add_row("", f"[dim]↑ {f.hint}[/dim]")
         console.print(Panel(table, title=spec.title, border_style="cyan"))
 
-        # 2) action picker
-        choices: list[str] = ["✅ Go (commit)"]
+        # 2) action picker — default is "Go" so pressing Enter accepts all
+        # defaults without further typing.
+        go_label = "✅ Go (commit)"
+        choices: list[str] = [go_label]
         for f in spec.fields:
             if f.editable:
                 choices.append(f"✏  Edit {f.name}")
         choices.append("← back")
         pick = questionary.select(
-            "action:", choices=choices, instruction="Ctrl-C / Esc → back"
+            "action:",
+            choices=choices,
+            default=go_label,
+            instruction="Enter = Go  ·  ↑↓ to pick  ·  Ctrl-C → back",
         ).ask()
         if pick is None:
             return CANCEL
@@ -182,17 +187,26 @@ class NextAction:
 
 
 def next_actions_menu(actions: list[NextAction], console: Console) -> None:
-    """Post-success "what next?" — recommended item shown first; picking 'Done' returns."""
+    """Post-success "what next?" — recommended item shown first and pre-selected;
+    picking 'Done' returns. Pressing Enter accepts the recommended action."""
     titles: list[str] = []
     by_title: dict[str, NextAction] = {}
+    default_title: str | None = None
     for a in actions:
         prefix = "→ " if a.recommended else "  "
         ann = f"  [dim]({a.annotation})[/dim]" if a.annotation else ""
         title = f"{prefix}{a.label}{ann}"
         titles.append(title)
         by_title[title] = a
+        if a.recommended and default_title is None:
+            default_title = title
+    if default_title is None and titles:
+        default_title = titles[0]
     pick = questionary.select(
-        "What next?", choices=titles, instruction="Ctrl-C → back to menu"
+        "What next?",
+        choices=titles,
+        default=default_title,
+        instruction="Enter = pick  ·  Ctrl-C → menu",
     ).ask()
     if pick is None:
         return
