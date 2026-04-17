@@ -174,7 +174,11 @@ def _dispatch(spec: CommandSpec, settings: Settings, console: Console) -> None:
         for param in spec.params:
             # Hidden params are for scripted use only — keep them callable via
             # flags but skip the interactive prompt so the shell stays quiet.
+            # Inject the declared default so the callback receives the real
+            # value (e.g. None), not typer's raw OptionInfo wrapper — otherwise
+            # `if param:` branches see a truthy OptionInfo and explode downstream.
             if param.hidden:
+                answers[param.name] = param.default
                 continue
             # The destructive confirm below auto-injects `yes=True`; don't
             # prompt the user about it separately.

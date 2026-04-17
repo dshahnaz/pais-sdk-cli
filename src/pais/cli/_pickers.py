@@ -97,10 +97,19 @@ def pick_kb(ctx: PickerContext) -> Any:
 
 
 def pick_index(ctx: PickerContext) -> Any:
-    """Choose an index under the previously-picked KB."""
+    """Choose an index under the previously-picked KB.
+
+    When no KB is in scope yet (e.g. `agent create`, which has no `kb_ref`
+    parameter), cascade into `pick_kb` first so the user sees a list of
+    existing KBs instead of a free-text fallback.
+    """
     kb_ref = ctx.answers.get("kb_ref") or ctx.answers.get("kb_id")
     if not kb_ref:
-        return _manual_fallback("kb_ref not yet chosen; type the index alias or UUID:")
+        picked = pick_kb(ctx)
+        if picked is CANCEL:
+            return CANCEL
+        ctx.answers["kb_ref"] = picked
+        kb_ref = picked
     cfg, _, _ = load_profile_config()
     try:
         kb_uuid = _alias.resolve_kb(ctx.client, ctx.profile, str(kb_ref), cfg=cfg)
@@ -416,11 +425,20 @@ def pick_or_create_kb(ctx: PickerContext) -> Any:
 
 
 def pick_or_create_index(ctx: PickerContext) -> Any:
-    """Like `pick_index` but with recents + `+ create new`. Requires
-    `ctx.answers['kb_ref']` (or 'kb_id') to scope the index list."""
+    """Like `pick_index` but with recents + `+ create new`.
+
+    When no KB is in scope yet, cascade into `pick_or_create_kb` so the
+    `+ create new` affordance is preserved. If the user chooses to create
+    a new KB, bubble `CREATE_NEW` back up so the caller's KB-create branch
+    runs — listing indexes under a non-existent KB would be meaningless.
+    """
     kb_ref = ctx.answers.get("kb_ref") or ctx.answers.get("kb_id")
     if not kb_ref:
-        return _manual_fallback("kb_ref not yet chosen; type the index alias or UUID:")
+        picked = pick_or_create_kb(ctx)
+        if picked is CANCEL or picked == CREATE_NEW:
+            return picked
+        ctx.answers["kb_ref"] = picked
+        kb_ref = picked
     cfg, _, _ = load_profile_config()
     try:
         kb_uuid = _alias.resolve_kb(ctx.client, ctx.profile, str(kb_ref), cfg=cfg)

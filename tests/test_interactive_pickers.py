@@ -8,6 +8,7 @@ import pytest
 
 from pais.cli import _alias, _pickers
 from pais.cli._pickers import PickerContext, pick_index, pick_kb, pick_splitter_kind
+from pais.cli._prompts import CANCEL
 from pais.client import PaisClient
 from pais.errors import PaisServerError
 from pais.models import IndexCreate, KnowledgeBaseCreate
@@ -274,3 +275,82 @@ def test_first_model_id_returns_none_on_error() -> None:
     client.models = _BoomModels()  # type: ignore[assignment]
     ctx = PickerContext(client=client, answers={}, profile="default")
     assert first_model_id(ctx, kind="EMBEDDINGS") is None
+
+
+# ----- KB→index cascade (v0.7.2) ---------------------------------------------
+
+
+def test_pick_index_cascades_to_kb_pick_when_missing(
+    fake_q: _FakeQuestionary, isolated_cache: None
+) -> None:
+    """No KB in scope (e.g. `agent create`) → cascade into pick_kb, then list
+    indexes under the picked KB. User sees two select lists, not a text prompt."""
+    store = Store()
+    client = PaisClient(FakeTransport(store))
+    kb = client.knowledge_bases.create(KnowledgeBaseCreate(name="kb-cascade"))
+    ix = client.indexes.create(
+        kb.id,
+        IndexCreate(name="ix-cascade", embeddings_model_endpoint="BAAI/bge-small-en-v1.5"),
+    )
+    ctx = PickerContext(client=client, answers={}, profile="default")
+
+    calls: list[tuple[str, list[Any]]] = []
+
+    def _select(message: str, *, choices: list[Any], **_: Any) -> _FakeAsk:
+        calls.append((message, list(choices)))
+        return _FakeAsk(choices[0])
+
+    fake_q.select = _select  # type: ignore[method-assign]
+    result = pick_index(ctx)
+
+    assert len(calls) == 2, "expected KB picker then index picker"
+    assert "Pick a KB" in calls[0][0]
+    assert "under" in calls[1][0]
+    assert ctx.answers["kb_ref"] == kb.id
+    assert result == ix.id
+
+
+def test_pick_index_cascade_cancel_propagates(
+    fake_q: _FakeQuestionary, isolated_cache: None
+) -> None:
+    """If the user hits `← back` on the cascaded KB picker, the outer
+    pick_index returns CANCEL and leaves ctx.answers untouched."""
+    store = Store()
+    client = PaisClient(FakeTransport(store))
+    client.knowledge_bases.create(KnowledgeBaseCreate(name="kb-cancel"))
+    ctx = PickerContext(client=client, answers={}, profile="default")
+
+    def _select(message: str, *, choices: list[Any], **_: Any) -> _FakeAsk:
+        return _FakeAsk(_pickers._BACK)
+
+    fake_q.select = _select  # type: ignore[method-assign]
+    result = pick_index(ctx)
+
+    assert result is CANCEL
+    assert "kb_ref" not in ctx.answers
+
+
+def test_pick_or_create_index_cascades_create_new(
+    fake_q: _FakeQuestionary, isolated_cache: None
+) -> None:
+    """pick_or_create_index → user picks `+ create new` from the cascaded KB
+    picker → surface CREATE_NEW upward without attempting to list indexes
+    under a non-existent KB."""
+    store = Store()
+    client = PaisClient(FakeTransport(store))
+    client.knowledge_bases.create(KnowledgeBaseCreate(name="kb-create-cascade"))
+    ctx = PickerContext(client=client, answers={}, profile="default")
+
+    calls: list[str] = []
+
+    def _select(message: str, *, choices: list[Any], **_: Any) -> _FakeAsk:
+        calls.append(message)
+        return _FakeAsk(_pickers._CREATE)
+
+    fake_q.select = _select  # type: ignore[method-assign]
+    result = _pickers.pick_or_create_index(ctx)
+
+    assert result == _pickers.CREATE_NEW
+    assert len(calls) == 1, "index list should never be attempted"
+    assert "KB" in calls[0]
+    assert "kb_ref" not in ctx.answers
