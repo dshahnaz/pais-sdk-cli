@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.5 · relax enum drift, surface logs, ship `pais doctor`
+
+### Fixed
+- **`pais models list` crashed on real PAIS** returning `model_engine="LLAMA_CPP"`. The SDK's closed Enum only accepted `VLLM`/`INFINITY`/`OTHER`. Root cause: the published Broadcom doc types every status field as `string` (the enumerated values are examples, not closed sets). Fix: all 11 enum-typed model fields (`model_type`, `model_engine`, `Index.status`, `Indexing.state`, `Document.state`, `data_origin_type`, `IndexRefreshPolicy.policy_type`, `ToolLink.link_type`, `DataSource.type`) → `str`. Enum classes stay defined as named constants for IDE autocomplete (`ModelEngine.VLLM == "VLLM"` still works).
+
+### Added
+- **`pais logs path`** — prints the active log file path (for `tail -f $(pais logs path)`).
+- **`pais logs tail [-n N] [-f]`** — prints the last N log lines (default 50); `-f` follows (TTY only).
+- **`pais logs clear --yes`** — truncates the active log. Rotated backups stay.
+- **`pais doctor`** — one-shot diagnostic probe: ping + KB list + indexes + agents + models + mcp_tools. Captures every error with status_code + request_id + redacted response body. Emits a markdown report to stdout AND `~/.pais/logs/doctor-<timestamp>.md` for sharing.
+- **Landing screen footer** now shows the log file path + `pais -v for full stream` + `pais logs tail`.
+- **`error_banner` footer hint** on every workflow failure: *"Run `pais doctor` for a diagnostic to share."*
+- 3 LLAMA_CPP model in mock fixtures so tests cover the doc-string contract.
+
+### Changed
+- All status-field enums relaxed to `str` per the doc contract. Enum classes kept as named constants so `isinstance` callers see the change, but equality checks (`m.model_engine == ModelEngine.VLLM`) still work. Flagged in CHANGELOG per the plan.
+
+### Doc-verified facts (added to CLAUDE.md)
+- Doc types every status field as `string`. Enum classes are constants only.
+- No `/health` endpoint documented. Reachability: HEAD on base URL.
+- No server-side log endpoint. Logs are client-side (`~/.pais/logs/pais.log`, rotating). `pais doctor` collates everything.
+
 ## 0.6.4 · fix delete + search: SDK reconciled against the published Broadcom doc
 
 Three SDK ↔ doc mismatches found by re-fetching <https://developer.broadcom.com/xapis/vmware-private-ai-service-api/latest/>. The cleanup workflow's "delete looks like it does nothing" trace led to all three.

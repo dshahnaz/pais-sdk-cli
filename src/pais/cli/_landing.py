@@ -127,6 +127,9 @@ def show_landing(client: PaisClient, settings: Settings, console: Console) -> Wo
         by_title[t] = w
     titles.append(_FALLBACK_FLAT_MENU)
 
+    log_path = settings.log_file or "~/.pais/logs/pais.log"
+    console.print(f"[dim]logs: {log_path}  ·  pais -v for full stream  ·  pais logs tail[/dim]\n")
+
     pick = questionary.select(
         "command:",
         choices=titles,

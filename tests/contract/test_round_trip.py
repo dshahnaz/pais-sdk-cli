@@ -62,8 +62,8 @@ def test_model_list_round_trip() -> None:
     assert obj.object == "list"
     assert len(obj.data) == 2
     assert obj.data[0].id == "openai/gpt-oss-120b-4x"
-    assert obj.data[0].model_type.value == "COMPLETIONS"
-    assert obj.data[1].model_engine.value == "INFINITY"
+    assert obj.data[0].model_type == "COMPLETIONS"
+    assert obj.data[1].model_engine == "INFINITY"
 
 
 def test_validation_error_parses_into_pais_validation_error() -> None:

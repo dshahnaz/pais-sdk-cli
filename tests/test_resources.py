@@ -27,7 +27,7 @@ def test_kb_crud(any_client: PaisClient) -> None:
 
     kb = any_client.knowledge_bases.create(KnowledgeBaseCreate(name="docs", description="manuals"))
     assert kb.name == "docs"
-    assert kb.data_origin_type.value == "LOCAL_FILES"
+    assert kb.data_origin_type == "LOCAL_FILES"
 
     got = any_client.knowledge_bases.get(kb.id)
     assert got.id == kb.id
@@ -75,14 +75,14 @@ def test_index_upload_search_flow(any_client: PaisClient) -> None:
         doc = any_client.indexes.upload_document(kb.id, ix.id, path)
     finally:
         os.unlink(path)
-    assert doc.state.value == "INDEXED"
+    assert doc.state == "INDEXED"
     assert doc.chunk_count and doc.chunk_count > 0
 
     # Wait-for-indexing returns the DONE record.
     indexing = any_client.indexes.wait_for_indexing(
         kb.id, ix.id, timeout=2.0, interval=0.01, sleep=lambda _: None
     )
-    assert indexing.state.value == "DONE"
+    assert indexing.state == "DONE"
 
     # Search surfaces a hit from the uploaded text.
     result = any_client.indexes.search(kb.id, ix.id, SearchQuery(query="WorkflowManager", top_n=3))
@@ -143,7 +143,7 @@ def test_mcp_tools_and_agent_chat(any_client: PaisClient) -> None:
 
 def test_models_and_embeddings(any_client: PaisClient) -> None:
     models = any_client.models.list()
-    assert any(m.model_type and m.model_type.value == "COMPLETIONS" for m in models.data)
+    assert any(m.model_type and m.model_type == "COMPLETIONS" for m in models.data)
 
     emb = any_client.embeddings.create(
         EmbeddingRequest(model="BAAI/bge-small-en-v1.5", input=["hello", "world"])

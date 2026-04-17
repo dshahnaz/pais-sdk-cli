@@ -21,7 +21,7 @@ class DataOriginType(str, Enum):
 
 
 class IndexRefreshPolicy(PaisModel):
-    policy_type: IndexRefreshPolicyType = IndexRefreshPolicyType.MANUAL
+    policy_type: str = "MANUAL"
     cron_expression: str | None = None
 
 
@@ -31,14 +31,14 @@ class KnowledgeBase(PaisModel):
     created_at: int
     name: str
     description: str | None = None
-    data_origin_type: DataOriginType = DataOriginType.LOCAL_FILES
+    data_origin_type: str = "LOCAL_FILES"
     index_refresh_policy: IndexRefreshPolicy = IndexRefreshPolicy()
 
 
 class KnowledgeBaseCreate(PaisModel):
     name: str
     description: str | None = None
-    data_origin_type: DataOriginType = DataOriginType.LOCAL_FILES
+    data_origin_type: str = "LOCAL_FILES"
     index_refresh_policy: IndexRefreshPolicy = IndexRefreshPolicy()
 
 

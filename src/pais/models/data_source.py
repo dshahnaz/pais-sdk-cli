@@ -22,7 +22,7 @@ class DataSource(PaisModel):
     created_at: int
     name: str
     description: str | None = None
-    type: DataSourceType
+    type: str = "LOCAL_FILES"
     origin_url: str | None = None
     credentials: dict[str, Any] | None = None
 
@@ -30,6 +30,6 @@ class DataSource(PaisModel):
 class DataSourceCreate(PaisModel):
     name: str
     description: str | None = None
-    type: DataSourceType
+    type: str = "LOCAL_FILES"
     origin_url: str | None = None
     credentials: dict[str, Any] | None = Field(default=None)

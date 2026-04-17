@@ -46,17 +46,17 @@ class Index(PaisModel):
     name: str
     description: str | None = None
     embeddings_model_endpoint: str
-    text_splitting: TextSplittingKind = TextSplittingKind.SENTENCE
+    text_splitting: str = "SENTENCE"
     chunk_size: int = 400
     chunk_overlap: int = 100
-    status: IndexStatus = IndexStatus.AVAILABLE
+    status: str = "AVAILABLE"
 
 
 class IndexCreate(PaisModel):
     name: str
     description: str | None = None
     embeddings_model_endpoint: str
-    text_splitting: TextSplittingKind = TextSplittingKind.SENTENCE
+    text_splitting: str = "SENTENCE"
     chunk_size: int = 400
     chunk_overlap: int = 100
 
@@ -65,7 +65,7 @@ class IndexUpdate(PaisModel):
     name: str | None = None
     description: str | None = None
     embeddings_model_endpoint: str | None = None
-    text_splitting: TextSplittingKind | None = None
+    text_splitting: str | None = None
     chunk_size: int | None = None
     chunk_overlap: int | None = None
 
@@ -75,7 +75,7 @@ class Indexing(PaisModel):
     object: Literal["indexing"] = "indexing"
     created_at: int
     index_id: str | None = None
-    state: IndexingState = IndexingState.PENDING
+    state: str = "PENDING"
     started_at: int | None = None
     finished_at: int | None = None
     error: str | None = None
@@ -87,7 +87,7 @@ class Document(PaisModel):
     created_at: int
     index_id: str | None = None
     origin_name: str
-    state: DocumentState = DocumentState.PENDING
+    state: str = "PENDING"
     size_bytes: int | None = None
     chunk_count: int | None = None
 

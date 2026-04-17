@@ -14,7 +14,7 @@ class ToolLinkType(str, Enum):
 
 
 class ToolLink(PaisModel):
-    link_type: ToolLinkType
+    link_type: str
     tool_id: str
     top_n: int | None = None
     similarity_cutoff: float | None = None
