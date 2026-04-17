@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.8 · type-aware shell prompts, model pickers, kb-list resilience
+
+### Fixed
+- **Interactive shell typed every option as text.** Pressing "✏ Edit with_counts" (a `bool`) popped a text widget — the user had to literally type `true`. Same for `--output` (only 3 choices), `--workers`, `--chunk-size`, `--epoch`, `--strategy`, `--text-splitting`. Root cause: `from __future__ import annotations` deferred `p.annotation` to the **string** `"bool"`, so `param.annotation is bool` in `_prompts.py` was always False and every branch fell through to plain text. Fix: `_introspect.py` now calls `typing.get_type_hints(cb, include_extras=True)` to resolve PEP 563 strings back to real types before building `ParamSpec`. `_prompts.py` also gained a defensive `_is_type(ann, target)` string-name fallback for any callback whose hints can't resolve. Booleans → `questionary.confirm` (y/N). Literal / Enum / `output` / `strategy` / `text_splitting` → `questionary.select`. `int` / `float` → validated text. `Path` → path widget.
+- **`pais kb list --with-counts` crashed when one KB's `/indexes` 422'd.** The landing screen silently suppressed per-KB errors (so "1 indexes" still showed), but `kb_list` had no isolation — one bad KB sank the whole command. Now wrapped in a per-KB try/except: the offending row renders `!` in the `indexes` / `documents` columns and the server's validation detail is echoed on stderr as `warn: kb=<name> …`. Exit code 0 as long as the KB list itself succeeded.
+- **`PaisError.__str__` was opaque on 422.** Users saw `codes=[VALIDATION_ERROR]` and had to dig through logs to find which field the server rejected. Now the first `ErrorDetail.loc` + `msg` are appended as `detail=<path>: <message>`. `value` is deliberately excluded — it can carry request payload bits (e.g. a rejected password field).
+
+### Added — UX
+- **Model pickers in the shell.** `pais index create` and `pais agent create` no longer ask the user to remember `BAAI/bge-small-en-v1.5` or `openai/gpt-oss-120b-4x` by hand. Both now fetch `GET /compatibility/openai/v1/models`, filter by `model_type` (`EMBEDDINGS` vs `COMPLETIONS`), and present a select list with each model's id + engine suffix. The `setup_agent` workflow's two model FieldSpecs use the same pickers on Edit, and default to the first server-advertised model of the right kind (falling back to the hard-coded defaults only if the list is empty). Every picker keeps the "✏ enter manually" fallback and degrades to free-text on `PaisError` so a flaky `/models` endpoint never blocks the flow.
+- `pais.cli._pickers.pick_embeddings_model`, `pick_chat_model`, and the `first_model_id(ctx, kind=…)` helper (used by workflows to pre-seed defaults).
+- Registered in `_OVERRIDES`: `("index", "create", "embeddings_model")` → embeddings picker; `("agent", "create", "model")` → chat picker.
+
+### Added — tests (+27, now 351 total)
+- `tests/test_prompts.py` (new, 14 tests) — pins widget dispatch over every annotation shape: bool → confirm (including PEP 563 string fallback), Literal + static-enum `output` / `strategy` / `text_splitting` → select, int/float → validated text, Path → path, full-tree audit asserts no option falls through to plain text because of a leaked string annotation.
+- `tests/test_errors.py` (new, 5 tests) — enriched `__str__` surfaces `detail=loc: msg`; `value` stays out; `error_from_response(422, …)` wires `detail[]` through.
+- `tests/test_cli_kb_list.py` (new, 2 tests) — two KBs, one's `indexes.list` monkeypatched to raise 422; asserts exit code 0, `!` markers in the bad row, and `warn: kb=…` + `detail=query.limit: field required` on stderr.
+- `tests/test_interactive_pickers.py` (+6 tests) — model pickers filter by `model_type`, fall back to manual entry on empty list, fall back to text on `PaisError`; `first_model_id` helper returns the first match (or None).
+
+### Internal
+- `typing` imported in `_introspect.py` for `get_type_hints` resolution. Failure path preserved — any callback whose hints can't resolve still uses the raw `p.annotation` and relies on the `_is_type` string fallback.
+
 ## 0.6.7 · progress bars on long ops, TLS warning dedup, better confirm label
 
 ### Added

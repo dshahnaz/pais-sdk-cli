@@ -220,6 +220,69 @@ def pick_cached_alias(_ctx: PickerContext) -> Any:
     return pick.split("/", 1)[1]  # just the alias part — clear() takes alias name
 
 
+def pick_embeddings_model(ctx: PickerContext) -> Any:
+    """Choose an embeddings model from the server's `/compatibility/openai/v1/models`."""
+    return _pick_model(ctx, kind="EMBEDDINGS", label="Pick an embeddings model:")
+
+
+def pick_chat_model(ctx: PickerContext) -> Any:
+    """Choose a chat / completions model from the server's model list."""
+    return _pick_model(ctx, kind="COMPLETIONS", label="Pick a chat model:")
+
+
+def _pick_model(ctx: PickerContext, *, kind: str, label: str) -> Any:
+    """Shared body for model pickers. Filters `ctx.client.models.list()` by
+    `model_type` (`"EMBEDDINGS"` / `"COMPLETIONS"`), lists each match with a
+    dim engine suffix, and always offers the manual-text fallback so users
+    can paste a model id the server hasn't advertised."""
+    manual_prompt = f"type a {kind.lower()} model id:"
+    try:
+        all_models = ctx.client.models.list().data
+    except PaisError as e:
+        return _manual_fallback(f"could not list models ({e}); {manual_prompt}")
+
+    matches = [m for m in all_models if (m.model_type or "") == kind]
+    if not matches:
+        return _manual_fallback(f"server returned no {kind.lower()} models; {manual_prompt}")
+
+    choices: list[Any] = []
+    value_for_title: dict[str, str] = {}
+    for m in matches:
+        engine = m.model_engine or "—"
+        title = f"{m.id}  ·  {engine}"
+        choices.append(title)
+        value_for_title[title] = m.id
+    choices.append(_DIVIDER)
+    choices.append(_MANUAL)
+    choices.append(_BACK)
+
+    pick = questionary.select(
+        label,
+        choices=choices,
+        default=_first_selectable(choices),
+        instruction=_BACK_HINT,
+    ).ask()
+    if pick is None or pick in (_BACK, _DIVIDER):
+        return CANCEL
+    if pick == _MANUAL:
+        return _manual_fallback(manual_prompt)
+    return value_for_title[pick]
+
+
+def first_model_id(ctx: PickerContext, *, kind: str) -> str | None:
+    """Return the first `Model.id` matching `kind`, or None if the list is
+    empty / the endpoint errors. Used by workflows to pick a sensible
+    default before showing the review screen."""
+    try:
+        models = ctx.client.models.list().data
+    except PaisError:
+        return None
+    for m in models:
+        if (m.model_type or "") == kind:
+            return m.id
+    return None
+
+
 def pick_mcp_tool(ctx: PickerContext) -> Any:
     try:
         tools = ctx.client.mcp_tools.list(server="built-in").data
@@ -262,6 +325,8 @@ _OVERRIDES: dict[tuple[tuple[str, ...] | None, str], Picker] = {
     (("splitters", "show"), "kind"): pick_splitter_kind,
     (("alias", "clear"), "alias"): pick_cached_alias,
     (("agent", "create"), "kb_search_tool"): pick_mcp_tool,
+    (("index", "create"), "embeddings_model"): pick_embeddings_model,
+    (("agent", "create"), "model"): pick_chat_model,
 }
 
 

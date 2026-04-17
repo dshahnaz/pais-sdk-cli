@@ -12,6 +12,7 @@ typer's argv parser).
 from __future__ import annotations
 
 import inspect
+import typing
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -97,16 +98,34 @@ def _walk(node: typer.Typer, *, path: tuple[str, ...], out: list[CommandSpec]) -
         _walk(sub, path=sub_path, out=out)
 
 
+def _resolve_hints(cb: Callable[..., Any]) -> dict[str, Any]:
+    """Return {param_name: resolved-type} using PEP 563 resolution.
+
+    Under `from __future__ import annotations`, `inspect.signature(cb)`
+    returns annotations as strings (e.g. `"bool"`), which breaks downstream
+    `is bool` / `in (int, float)` type checks in `_prompts.py`. Running
+    `typing.get_type_hints` resolves those strings back to real type objects.
+    Falls back to `{}` on any resolution failure (forward refs, missing
+    imports) — callers default to the raw `inspect.Parameter.annotation`.
+    """
+    try:
+        return typing.get_type_hints(cb, include_extras=True)
+    except Exception:
+        return {}
+
+
 def _params(cb: Callable[..., Any]) -> list[ParamSpec]:
+    hints = _resolve_hints(cb)
     out: list[ParamSpec] = []
     for name, p in inspect.signature(cb).parameters.items():
+        ann = hints.get(name, p.annotation)
         info = p.default
         if isinstance(info, ArgumentInfo):
             required = info.default is Ellipsis or info.default is ...
             out.append(
                 ParamSpec(
                     name=name,
-                    annotation=p.annotation,
+                    annotation=ann,
                     kind="argument",
                     default=None if required else info.default,
                     required=required,
@@ -119,7 +138,7 @@ def _params(cb: Callable[..., Any]) -> list[ParamSpec]:
             out.append(
                 ParamSpec(
                     name=name,
-                    annotation=p.annotation,
+                    annotation=ann,
                     kind="option",
                     default=None if required else info.default,
                     required=required,
@@ -132,7 +151,7 @@ def _params(cb: Callable[..., Any]) -> list[ParamSpec]:
             out.append(
                 ParamSpec(
                     name=name,
-                    annotation=p.annotation,
+                    annotation=ann,
                     kind="option",
                     default=info if info is not inspect.Parameter.empty else None,
                     required=info is inspect.Parameter.empty,

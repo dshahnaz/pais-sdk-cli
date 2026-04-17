@@ -38,7 +38,7 @@ def prompt_for_param(param: ParamSpec) -> Any:
     default = param.default
 
     # 1. Booleans → confirm.
-    if param.annotation is bool:
+    if _is_type(param.annotation, bool):
         return _ok(questionary.confirm(label, default=bool(default)).ask())
 
     # 2. Literal[...] / Enum → select.
@@ -72,8 +72,8 @@ def prompt_for_param(param: ParamSpec) -> Any:
         return Path(ans).expanduser()
 
     # 4. int / float → text + validator.
-    if param.annotation in (int, float):
-        cast = int if param.annotation is int else float
+    if _is_type(param.annotation, int) or _is_type(param.annotation, float):
+        cast = int if _is_type(param.annotation, int) else float
 
         def _validate(v: str, _cast: type = cast) -> bool | str:
             if v.strip() == "":
@@ -113,6 +113,18 @@ def _label(param: ParamSpec) -> str:
     return f"{param.name}{suffix}"
 
 
+def _is_type(ann: Any, target: type) -> bool:
+    """True if `ann` is `target` (or a PEP 563 stringified reference to it).
+
+    `_resolve_hints` in `_introspect.py` normally resolves strings back to
+    types, but callbacks whose hints can't be resolved (forward refs,
+    missing imports) fall through with the raw string — this fallback
+    keeps widget dispatch correct in that case."""
+    if ann is target:
+        return True
+    return bool(ann == target.__name__)
+
+
 def _enum_choices(param: ParamSpec) -> list[str] | None:
     """Return a fixed choice list if the param is a Literal, an Enum, or a
     well-known str option (output/strategy/text_splitting)."""
@@ -133,14 +145,14 @@ def _enum_choices(param: ParamSpec) -> list[str] | None:
         return [m for m in ann.__members__]
 
     # Static fallback for str-typed params with documented enums.
-    if ann is str and param.name in _STATIC_ENUMS:
+    if _is_type(ann, str) and param.name in _STATIC_ENUMS:
         return list(_STATIC_ENUMS[param.name])
 
     return None
 
 
 def _is_path(ann: Any) -> bool:
-    if ann is Path:
+    if ann is Path or ann == "Path":
         return True
     origin = get_origin(ann)
     if origin in (typing.Union, getattr(typing, "UnionType", type(None))):

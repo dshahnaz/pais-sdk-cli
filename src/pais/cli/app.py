@@ -233,7 +233,7 @@ def kb_list(
             kbs = c.knowledge_bases.list().data
             rows: list[dict[str, object]] = []
             for kb in kbs:
-                row = {
+                row: dict[str, object] = {
                     "id": kb.id,
                     "name": kb.name,
                     "data_origin_type": getattr(kb.data_origin_type, "value", kb.data_origin_type),
@@ -242,9 +242,22 @@ def kb_list(
                     "updated": _fmt_ts(getattr(kb, "last_updated_at", None), epoch=epoch),
                 }
                 if with_counts:
-                    indexes = c.indexes.list(kb.id).data
-                    row["indexes"] = len(indexes)
-                    row["documents"] = sum(getattr(i, "num_documents", 0) or 0 for i in indexes)
+                    try:
+                        indexes = c.indexes.list(kb.id).data
+                    except PaisError as e:
+                        # One bad KB shouldn't sink the whole command. Mark the
+                        # row and surface the server's validation detail on
+                        # stderr so the user can see *which* field the server
+                        # rejected for this KB.
+                        row["indexes"] = "!"
+                        row["documents"] = "!"
+                        typer.echo(
+                            f"warn: kb={kb.name} indexes unavailable: {e}",
+                            err=True,
+                        )
+                    else:
+                        row["indexes"] = len(indexes)
+                        row["documents"] = sum(getattr(i, "num_documents", 0) or 0 for i in indexes)
                 rows.append(row)
             cols = ["id", "name", "data_origin_type", "created", "updated"]
             if with_counts:
