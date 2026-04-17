@@ -37,6 +37,7 @@ class Agent(PaisModel):
     # Doc-aligned: agent points at an index UUID directly.
     index_id: str | None = None
     index_top_n: int | None = None
+    index_similarity_cutoff: float | None = None
     # Legacy: tools=[ToolLink(...)] kept for back-compat with deployments
     # that still wire MCP tools through the agent surface.
     tools: list[ToolLink] = []
@@ -56,6 +57,7 @@ class AgentCreate(PaisModel):
     # Doc-aligned: prefer this for new code.
     index_id: str | None = None
     index_top_n: int | None = None
+    index_similarity_cutoff: float | None = None
     # Legacy fallback.
     tools: list[ToolLink] = []
 
@@ -65,6 +67,9 @@ class AgentUpdate(PaisModel):
     description: str | None = None
     model: str | None = None
     instructions: str | None = None
+    index_id: str | None = None
+    index_top_n: int | None = None
+    index_similarity_cutoff: float | None = None
     tools: list[ToolLink] | None = None
 
 
