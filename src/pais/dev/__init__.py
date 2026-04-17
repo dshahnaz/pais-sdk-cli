@@ -1,5 +1,6 @@
-"""Developer-time helpers for ingesting structured markdown into PAIS KBs.
+"""Tokenizer-backed helpers shared by the ingest splitters and preview.
 
-Split suites into per-section files, enforce a token budget against the
-`BAAI/bge-small-en-v1.5` tokenizer, upload them via the SDK.
+Holds `pais.dev.token_budget.token_count` — the single place that loads the
+`BAAI/bge-small-en-v1.5` tokenizer. All splitter-specific logic lives under
+`pais.ingest.splitters.*`.
 """

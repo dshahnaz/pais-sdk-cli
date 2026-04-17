@@ -50,6 +50,17 @@ def test_show_json_output_returns_meta_dict(runner: CliRunner, kind: str) -> Non
         assert meta[key], f"{kind}: meta.{key} is empty in JSON output"
 
 
+@pytest.mark.parametrize("kind", ["test_suite_bge", "test_suite_arctic"])
+def test_show_renders_recommended_index_config(runner: CliRunner, kind: str) -> None:
+    """v0.7.0: splitters with target_embeddings_model / suggested_index_chunk_size
+    render a 'Recommended index config' footer so users know what IndexCreate body to pass."""
+    r = runner.invoke(cli_app, ["splitters", "show", kind])
+    assert r.exit_code == 0, r.output
+    assert "Recommended index config" in r.output
+    assert "embeddings_model_endpoint" in r.output
+    assert "chunk_size" in r.output
+
+
 def test_list_default_compact(runner: CliRunner) -> None:
     """Default columns: kind + summary."""
     r = runner.invoke(cli_app, ["splitters", "list"])

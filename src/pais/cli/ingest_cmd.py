@@ -104,6 +104,8 @@ def ingest_root(
             cls = get_splitter(kind)
             splitter = cls(options)
 
+            _warn_on_splitter_index_mismatch(c, kb_uuid, idx_uuid, cls)
+
             console = Console()
             files = list(path.rglob("*")) if path.is_dir() else [path]
             with Progress(
@@ -136,6 +138,49 @@ def ingest_root(
             raise typer.Exit(code=2)
 
     _run(go)
+
+
+def _warn_on_splitter_index_mismatch(
+    client: PaisClient, kb_uuid: str, idx_uuid: str, splitter_cls: Any
+) -> None:
+    """Pre-flight: warn if the splitter's target embeddings model or suggested
+    chunk_size disagrees with the index's actual configuration.
+
+    Non-blocking — we still run the ingest. The goal is to catch the common
+    mistake of pointing `test_suite_bge` at an index configured for
+    Arctic-embed (or vice versa) before the user notices bad retrieval results.
+    """
+    from pais.ingest.splitters._base import meta_for
+
+    meta = meta_for(splitter_cls)
+    if meta.target_embeddings_model is None and meta.suggested_index_chunk_size is None:
+        return
+
+    try:
+        ix = client.indexes.get(kb_uuid, idx_uuid)
+    except Exception:
+        return  # best-effort; don't fail ingest over a pre-flight probe
+
+    warnings: list[str] = []
+    if (
+        meta.target_embeddings_model
+        and ix.embeddings_model_endpoint != meta.target_embeddings_model
+    ):
+        warnings.append(
+            f"splitter {splitter_cls.kind!r} targets embeddings_model={meta.target_embeddings_model!r} "
+            f"but the index uses {ix.embeddings_model_endpoint!r} - retrieval quality may degrade"
+        )
+    if (
+        meta.suggested_index_chunk_size is not None
+        and ix.chunk_size is not None
+        and ix.chunk_size < meta.suggested_index_chunk_size
+    ):
+        warnings.append(
+            f"index chunk_size={ix.chunk_size} is smaller than the splitter's recommended "
+            f"{meta.suggested_index_chunk_size} - chunks may be re-split mid-body, losing breadcrumb context"
+        )
+    for w in warnings:
+        typer.echo(f"warn: {w}", err=True)
 
 
 def _print_summary(report: IngestReport, report_path: Path, *, output: str) -> None:
@@ -259,6 +304,24 @@ def _render_show_panel(cls: Any, meta: Any, schema: dict[str, Any]) -> None:
             )
         console.print(opt_table)
 
+    # Recommended index config (v0.7.0+)
+    if (
+        meta.target_embeddings_model
+        or meta.suggested_index_chunk_size is not None
+        or meta.suggested_index_chunk_overlap is not None
+    ):
+        console.print("\n[bold]Recommended index config for this splitter[/bold]")
+        rec = Table(show_header=False, box=None, pad_edge=False)
+        rec.add_column(style="bold green", no_wrap=True)
+        rec.add_column()
+        if meta.target_embeddings_model:
+            rec.add_row("embeddings_model_endpoint", meta.target_embeddings_model)
+        if meta.suggested_index_chunk_size is not None:
+            rec.add_row("chunk_size", f"{meta.suggested_index_chunk_size} tokens")
+        if meta.suggested_index_chunk_overlap is not None:
+            rec.add_row("chunk_overlap", f"{meta.suggested_index_chunk_overlap} tokens")
+        console.print(rec)
+
     # Notes
     if meta.notes:
         console.print("\n[bold]Notes[/bold]")
@@ -285,6 +348,25 @@ def _constraint_summary(prop: dict[str, Any]) -> str:
     return ", ".join(parts) or "—"
 
 
+@splitters_app.command("new")
+def splitters_new(
+    kind: str = typer.Argument(..., help="Splitter kind (snake_case). Becomes the registry key."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print what would be written without touching the filesystem."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Overwrite existing files without asking."),
+    repo_root: Path | None = typer.Option(
+        None,
+        "--repo-root",
+        help="Path to the pais-sdk-cli repo root. Defaults to cwd.",
+    ),
+) -> None:
+    """Scaffold a new splitter: file + test + __init__ registration + doc row."""
+    from pais.cli.splitters_new_cmd import scaffold_splitter
+
+    scaffold_splitter(kind=kind, dry_run=dry_run, yes=yes, repo_root=repo_root)
+
+
 @splitters_app.command("preview")
 def splitters_preview(
     kind: str = typer.Argument(..., help="Splitter kind to preview."),
@@ -295,15 +377,37 @@ def splitters_preview(
         "--max-bytes",
         help="Cap total bytes scanned (when path is a directory).",
     ),
+    dump: Path | None = typer.Option(
+        None,
+        "--dump",
+        help="Write each emitted chunk to this directory (filename = origin_name).",
+    ),
+    show_all: bool = typer.Option(
+        False,
+        "--show-all",
+        help="Print every chunk's header + first 200 chars to stdout.",
+    ),
     output: str = OUTPUT_OPT,
 ) -> None:
-    """Run a splitter against a real file/dir (dry-run) and report the chunk distribution."""
+    """Run a splitter against a real file/dir (dry-run) and report the chunk distribution.
+
+    With `--dump <dir>/`, each chunk is written to disk so you can open and
+    verify every one before committing to an upload. With `--show-all`, each
+    chunk's header + first 200 chars is printed inline.
+    """
     from rich.console import Console
 
     from pais.cli._splitter_preview import preview, render_panel
 
     def go() -> None:
-        report = preview(kind, path, limit=limit, max_bytes=max_bytes)
+        report = preview(
+            kind,
+            path,
+            limit=limit,
+            max_bytes=max_bytes,
+            dump_to=dump,
+            show_all=show_all,
+        )
         if output == "table":
             render_panel(report, Console())
         else:

@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.7.0 · dedicated test-suite splitters, preview --dump, scaffolder
+
+### ⚠️ Breaking changes
+
+- **Removed four generic splitters.** `passthrough`, `text_chunks`, `markdown_headings`, `test_suite_md` are gone from `src/pais/ingest/splitters/`. The replacement surface is two purpose-built splitters: `test_suite_bge` (tuned for `BAAI/bge-small-en-v1.5`, 400-token budget, suggested index `chunk_size=512`) and `test_suite_arctic` (tuned for `Snowflake/snowflake-arctic-embed-m-v2.0`, 1500-token budget, suggested index `chunk_size=2048`). Existing `pais.toml` files referencing a removed kind will fail at parse time with a clear error listing the new registered kinds.
+- **Removed legacy helpers.** `pais.dev.split_suite`, `pais.dev.markdown`, `pais.dev.ingest` deleted — their only consumers were the removed splitters. `pais.cli.dev` redirect shim also deleted (`pais-dev` console script was removed in v0.5.0; the shim was a soft-landing for stale installs).
+
+### Migration
+
+If your TOML references one of the removed splitters:
+
+```diff
+ [profiles.default.knowledge_bases.test_suites.indexes.splitter]
+-kind = "test_suite_md"
++kind = "test_suite_bge"
+```
+
+Pick `test_suite_bge` if your index's `embeddings_model_endpoint` is `BAAI/bge-small-en-v1.5` (the common case), `test_suite_arctic` if it's `Snowflake/snowflake-arctic-embed-m-v2.0`.
+
+If you need a different splitter shape (raw passthrough, generic markdown, etc.), run:
+
+```bash
+pais splitters new my_custom          # interactive scaffolder
+```
+
+which generates the splitter file + test stub + `__init__.py` registration + doc row. Ships the contract by construction.
+
+### Added — splitters
+
+- **`test_suite_bge` / `test_suite_arctic`** (`src/pais/ingest/splitters/test_suite_{bge,arctic}.py`). Both emit one per-suite overview chunk + one per test case, each prepended with a compact 2-line breadcrumb (`# Suite: X | Testbed: Y | Components: A, B`). The breadcrumb lives **inside the chunk body** so the embedding vector captures suite-level context even when the chunk is retrieved alone — this is what prevents the "naked `**Key Operations**:` fragment" RAG failure.
+- **Shared core** (`src/pais/ingest/splitters/_test_suite_core.py`): markdown parser (fence-aware), testbed/components extractors, `fit_to_budget` ladder (whole-case → sub-sections at `**Label**:` → lines → single line), `emit_chunks` orchestrator. Both splitters are ~100 lines each.
+- **Optional Anthropic contextual retrieval** via `with_context_llm = true` / `--with-context-llm`. Adds an LLM-generated one-sentence context per chunk with prompt caching on the document block (49 % recall gain per [Anthropic 2024](https://www.anthropic.com/news/contextual-retrieval); ~$1-3 for 300 suites with Haiku 4.5). Install `pip install 'pais-sdk-cli[contextual]'` and set `ANTHROPIC_API_KEY`.
+
+### Added — SplitterMeta
+
+`src/pais/ingest/splitters/_base.py::SplitterMeta` gained three optional fields:
+
+- `target_embeddings_model: str | None` — e.g. `"BAAI/bge-small-en-v1.5"`
+- `suggested_index_chunk_size: int | None` — tokens
+- `suggested_index_chunk_overlap: int | None` — tokens
+
+Rendered in `pais splitters show <kind>` and `pais splitters preview ...` as a **Recommended index config for this splitter** footer, so users know exactly what `IndexCreate` body to pass.
+
+### Added — preview `--dump` + `--show-all`
+
+`pais splitters preview <kind> <path> --dump <dir>/` writes every emitted chunk to disk (filename = `origin_name`) so you can open each one and verify size/breadcrumb/semantic slicing before committing to an upload. `--show-all` prints each chunk's header + first 200 chars inline. Both work with table and JSON output modes.
+
+### Added — scaffolder (`pais splitters new <kind>`)
+
+Interactive prompts collect the meta fields; generates `src/pais/ingest/splitters/<kind>.py`, `tests/test_splitter_<kind>.py`, patches the `__init__.py` import list (alphabetized), and appends a row to `docs/ingestion.md` (via the `<!-- splitters-table-end -->` marker). `--dry-run` prints what would be written; `--yes` skips overwrite prompts.
+
+### Added — pre-flight check in `pais ingest`
+
+Before starting the ingest, compares the splitter's declared `target_embeddings_model` / `suggested_index_chunk_size` against the index's actual config. Warns (non-blocking) on mismatch — catches the `test_suite_bge` → arctic-embed index footgun before retrieval quality tells you.
+
+### Added — tests (+14 new; -28 removed; now 363 total)
+
+- `tests/test_splitter_test_suite_core.py` (new, 15 tests) — unit tests for the shared parse/extract/fit/emit helpers.
+- `tests/test_splitter_test_suite_bge.py` (new, 8 tests) — end-to-end on `tests/fixtures/test_suites/Access-Management.md`: every chunk ≤ 400 tokens, breadcrumb present, filename convention, group_key, metadata.
+- `tests/test_splitter_test_suite_arctic.py` (new, 5 tests) — arctic target + 1500-tok budget + output parity with bge for the sample fixture.
+- `tests/test_splitters_new_cmd.py` (new, 9 tests) — scaffolder's render/update/overwrite/dry-run paths.
+- `tests/test_splitter_preview.py` (rewritten, 11 tests) — now covers `--dump` (every chunk on disk), `--show-all` (first_chars populated), and the suggested-index footer in table + JSON output.
+- `tests/test_splitter_registry.py` (rewritten, 5 tests) — asserts exactly `{test_suite_bge, test_suite_arctic}` are registered and removed kinds raise KeyError (so stale TOML fails loudly).
+- Deleted: `tests/test_split_suite.py`, `tests/test_ingest.py`, `tests/test_markdown_parser.py`, `tests/test_cli_dev.py` — tested removed modules.
+- Updated: `tests/test_ingest_runner.py` (local `_FakeSplitter` instead of `passthrough`), `tests/test_kb_ensure.py` / `tests/test_config_writeback.py` / `tests/test_status_cmd.py` / `tests/test_interactive_pickers.py` — swapped removed kinds for the new ones.
+
+### Added — optional extra
+
+`[project.optional-dependencies] contextual = ["anthropic>=0.40"]`. Base install stays lean (no Anthropic SDK by default).
+
+### Test fixture
+
+`tests/fixtures/test_suites/Access-Management.md` — 256-line canonical test-suite file committed to the repo as the golden-path fixture.
+
 ## 0.6.8 · type-aware shell prompts, model pickers, kb-list resilience
 
 ### Fixed

@@ -211,7 +211,7 @@ def test_status_drift_reports_missing_kb_from_toml(
               chunk_overlap = 64
 
                 [profiles.default.knowledge_bases.demo.indexes.splitter]
-                kind = "passthrough"
+                kind = "test_suite_bge"
             """
         )
     )

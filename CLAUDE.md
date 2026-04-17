@@ -4,7 +4,7 @@ This file is auto-loaded when working in `pais-sdk-cli`. Read this before changi
 
 ## What this is
 
-Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled mock server (`pais_mock`) for offline development. Public on GitHub: <https://github.com/dshahnaz/pais-sdk-cli>. Latest tag: `v0.6.7` (see `pyproject.toml`/`__version__` for current).
+Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled mock server (`pais_mock`) for offline development. Public on GitHub: <https://github.com/dshahnaz/pais-sdk-cli>. Latest tag: `v0.7.0` (see `pyproject.toml`/`__version__` for current).
 
 ## Layout (one-pager)
 
@@ -14,26 +14,30 @@ Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled
   - `models/*.py` — contract-first pydantic models, shared with the mock; **all status fields are `str`** (not Enum) per the doc contract — Enum classes kept as named constants
   - `transport/{base,httpx_transport,fake_transport}.py` — Transport protocol + 2 impls
   - `auth/{base,none,bearer,oidc_password}.py` — pluggable auth strategies
-  - `ingest/registry.py` + `ingest/splitters/*.py` — splitter plug-in system (4 built-ins, each with `SplitterMeta`)
+  - `ingest/registry.py` + `ingest/splitters/*.py` — splitter plug-in system (2 built-ins: `test_suite_bge`, `test_suite_arctic`; each with `SplitterMeta` declaring target embeddings model + suggested index `chunk_size`/`chunk_overlap`)
+  - `ingest/splitters/_test_suite_core.py` — shared parsing + breadcrumb + fit-to-budget logic both test-suite splitters use
+  - `ingest/contextual.py` — optional Anthropic contextual-retrieval helper (requires `[contextual]` extra + `ANTHROPIC_API_KEY`)
   - `ingest/runner.py` — generic ingest pipeline (worker pool, JSON report)
   - `cli/app.py` — `pais` typer entrypoint (interactive shell on bare `pais` in TTY)
   - `cli/interactive.py` — interactive shell menu loop + flat command fallback
   - `cli/_landing.py` — smart landing screen (env state + recommended workflow)
   - `cli/_introspect.py` — walks typer command tree for the shell menu
-  - `cli/_pickers.py` — context-aware ref pickers (pick_kb, pick_index, pick_agent, pick_or_create_* variants, with ★ recents + `← back`)
-  - `cli/_prompts.py` — type-aware prompt builders for the shell
+  - `cli/_pickers.py` — context-aware ref pickers (pick_kb, pick_index, pick_agent, pick_embeddings_model, pick_chat_model, pick_or_create_* variants, with ★ recents + `← back`)
+  - `cli/_prompts.py` — type-aware prompt builders for the shell (resolves PEP 563 string annotations via `typing.get_type_hints` so bool→confirm and str-enums→select fire correctly)
   - `cli/_recent.py` — per-profile LRU cache of recently-used aliases
   - `cli/_config_writeback.py` — safe append-only TOML writeback (workflows save aliases to `pais.toml`)
-  - `cli/_splitter_preview.py` — dry-run splitter against a file (tokens + chars)
+  - `cli/_splitter_preview.py` — dry-run splitter against a file (tokens + chars); supports `--dump <dir>/` to write every chunk to disk and `--show-all` for inline chunk excerpts
+  - `cli/splitters_new_cmd.py` — `pais splitters new <kind>` interactive scaffolder (generates splitter file + test stub + `__init__.py` patch + docs row)
   - `cli/_workflows/` — 7 task-centric workflows (setup_agent, ingest_data, setup_kb, bootstrap_toml, chat, search, cleanup)
   - `cli/_flags.py` — shared `typer.Option` constants with long+short forms
   - `cli/{ingest_cmd,ensure_cmd,config_cmd,status_cmd,shell_cmd,doctor_cmd,logs_cmd}.py` — subcommands
   - `cli/{_alias,_kb_show,_config_file,_profile_config,_output}.py` — helpers
-  - `dev/{markdown,split_suite,token_budget,ingest}.py` — legacy helpers; `cli/dev.py` is a removal-redirect shim (console-script entry removed in v0.5.0)
+  - `dev/token_budget.py` — token_count wrapper around the `BAAI/bge-small-en-v1.5` tokenizer (used by both test-suite splitters and the preview). The other `dev/` modules + `cli/dev.py` shim were deleted in v0.7.0.
   - `config.py` — pydantic-settings: env > config-file profile > .env > defaults
   - `errors.py` (includes `IndexDeleteUnsupported`), `logging.py`
 - `src/pais_mock/{server,state,behaviors}.py` — FastAPI mock + in-memory `Store`; emits doc-aligned wire shapes (`{chunks: [...]}` for search, `{deleted: true}` for KB/agent delete)
-- `tests/` — 324 tests across contract, transport, auth, resources, CLI, ingest, alias resolver, ensure, interactive, workflows, pickers, landing, recent, config writeback, splitter meta/preview, search doc shape, index delete, cleanup verify + document pagination + purge progress callbacks, TLS warning dedup, doctor, logs, relaxed enums, verbosity tiers. Coverage gate: ≥ 85 % on touched modules.
+- `tests/` — 363 tests. Test-suite splitter coverage: `test_splitter_test_suite_core.py` (unit), `test_splitter_test_suite_bge.py` + `_arctic.py` (E2E on fixture), `test_splitters_new_cmd.py` (scaffolder), `test_splitter_preview.py` (`--dump` + `--show-all` + suggested-index footer). Plus contract, transport, auth, resources, CLI, ingest, alias resolver, ensure, interactive, workflows, pickers, landing, recent, config writeback, search doc shape, index delete, cleanup verify + pagination + purge progress, TLS warning dedup, doctor, logs, relaxed enums, verbosity tiers, type-aware prompt dispatch, enriched 422 error detail, per-KB kb-list resilience. Coverage gate: ≥ 85 % on touched modules.
+- `tests/fixtures/test_suites/Access-Management.md` — canonical test-suite fixture used by splitter tests.
 - `docs/` — `ingestion.md`, `architecture.md`, `migration-0.3-to-0.4.md`, `v0.4-plan.md`
 - `.github/workflows/ci.yml` — matrix Python 3.10 / 3.11 / 3.12
 
@@ -56,6 +60,9 @@ These shape the design — never assume otherwise without re-checking the docs:
 11. **Doc types every status field as `string`** — `model_engine`, `model_type`, `Index.status`, `Indexing.state`, `Document.state`, `data_origin_type`, `IndexRefreshPolicy.policy_type`, `ToolLink.link_type`, `DataSource.type`. Our SDK uses `str` for these (Enum classes kept as named constants: `ModelEngine.VLLM == "VLLM"`). Don't revert them to Enum-typed — it crashes on unknown values like `LLAMA_CPP`.
 12. **No `/health` endpoint documented.** Reachability check uses HEAD on the base URL — any HTTP response (incl. 4xx/5xx) means TCP+TLS work.
 13. **No server-side log endpoint documented.** Logs are client-side only (`~/.pais/logs/pais.log`, rotating). `pais doctor` collates everything for support.
+14. **Shell prompts rely on resolved type annotations.** `from __future__ import annotations` is project-wide, which turns `p.annotation` into the string `"bool"`. `_introspect.py` calls `typing.get_type_hints(cb)` to resolve them so `_prompts.py` dispatches to the right widget (confirm / select / validated text / path). If you add a new CLI option, its annotation must be resolvable — avoid forward-refs to types not importable at module load.
+15. **Splitter → index config coupling.** Each splitter's `SplitterMeta` declares `target_embeddings_model`, `suggested_index_chunk_size`, `suggested_index_chunk_overlap`. `pais ingest` warns at pre-flight if the index's actual config disagrees (non-blocking). `pais splitters show` / `preview` render these as a "Recommended index config" footer. When adding a new splitter, set these three fields so users know exactly what `IndexCreate` body to pass.
+16. **Two-layer chunking failure mode.** Our splitter (Layer A) must emit chunks small enough that the PAIS index's server-side re-chunking (Layer B, `chunk_size` tokens) keeps them atomic. If Layer B slices a test case, the bottom half becomes a naked `**Key Operations**: ...` fragment with no suite/case identifier. The test-suite splitters handle this by: (a) sizing chunks under the index's `chunk_size`, (b) putting the breadcrumb **inside the chunk body** (not metadata — there is no metadata) so the embedding captures suite context even if Layer B does split.
 
 ## Tooling
 
@@ -107,7 +114,7 @@ pip install --upgrade "git+https://github.com/dshahnaz/pais-sdk-cli.git@v<X.Y.Z>
 - `from __future__ import annotations` on every module (we support Python 3.10+).
 - `pais.dev.*` is **legacy / internal**. New code goes in `pais.ingest.*` or `pais.cli.*`. Don't add new public surface to `pais.dev`.
 - New CLI commands live in their own file under `pais.cli/<name>_cmd.py` and get wired in `app.py`. Use module-level `typer.Option` constants to satisfy ruff B008.
-- New splitters: subclass with `kind: ClassVar[str]`, `options_model: ClassVar[type[BaseModel]]`, `__init__(options)`, `split(path) -> Iterator[SplitDoc]`, `group_key(path) -> str`. Register with `@register_splitter`. Add a row to the table in README + `docs/ingestion.md`.
+- New splitters: use `pais splitters new <kind>` to scaffold — it generates the file + test stub + `__init__.py` patch + docs row with the contract baked in (`kind`, `options_model`, `meta`, `__init__(options)`, `split(path) -> Iterator[SplitDoc]`, `group_key(path) -> str`, `@register_splitter`). Then fill in `split()`.
 - Destructive CLI ops require `--yes`/`-y` AND prompt on TTY; refuse non-TTY without `--yes`.
 - Every alias-accepting command goes through `_resolve_kb` / `_resolve_index` — UUIDs pass through, declared aliases resolve to UUIDs (cached at `~/.pais/aliases.json`).
 - TOML config validation errors must point at the exact TOML path. Use pydantic models in `_profile_config.py`; never raw dicts.
@@ -136,7 +143,7 @@ Or set `PAIS_MODE=mock` (no HTTP, in-process `FakeTransport`). Settings preceden
 - **Don't start a plan that touches PAIS endpoints without a fresh WebFetch of the doc URL** — past misses (chunk_size units, agent `index_id` shape) each cost a release cycle. The SDK can drift from the spec; the doc is authoritative.
 - Don't bump only `pyproject.toml` and forget `__init__.py` (or vice versa) — `pip install --upgrade` will silently no-op.
 - Don't put secrets in `pais.toml` — the loader rejects `password`, `client_secret`, `bearer_token` at parse time.
-- Don't false-positive `--replace` matches: each splitter owns its `group_key`. Runner does `origin_name.startswith(group_key)`. Convention: most splitters end `group_key` with `__`; `passthrough` uses the full filename for exact match.
+- Don't false-positive `--replace` matches: each splitter owns its `group_key`. Runner does `origin_name.startswith(group_key)`. Convention for the test-suite splitters: `<SuiteSlug>__` prefix — one suite at a time, untouched suites stay.
 - Don't `pais kb ensure --prune` casually — it deletes server-side resources not in the TOML. `--yes` plus per-item TTY confirmation gate is mandatory.
 - Don't hand-edit the alias cache `~/.pais/aliases.json` — use `pais alias clear` instead.
 
