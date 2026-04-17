@@ -265,11 +265,25 @@ def _reprompt_for(param: ParamSpec):  # type: ignore[no-untyped-def]
     return _go
 
 
+_CONFIRM_LABEL_SKIP: frozenset[str] = frozenset({"yes", "output", "epoch"})
+
+
 def _confirmation_label(spec: CommandSpec, answers: dict[str, Any]) -> str:
-    """Render the resolved arguments for the confirm prompt so the user sees
-    exactly what they're about to mutate."""
-    keys = [p.name for p in spec.params if p.kind == "argument"]
-    parts = [f"{k}={answers.get(k)!r}" for k in keys if k in answers and k != "yes"]
+    """Render the resolved args+options for the confirm prompt so the user
+    sees exactly which resource they're about to mutate.
+
+    Includes every answered parameter — positional arguments and options —
+    except a small skip list of presentation-only flags (`yes`, `output`,
+    `epoch`). This is deliberately wider than typer's argument-vs-option
+    classification: pickers answer param names like `kb_id` / `kb_ref` which
+    may be reported either way depending on how the signature is introspected,
+    and the point of the label is to surface the resource reference."""
+    known = {p.name for p in spec.params}
+    parts = [
+        f"{k}={v!r}"
+        for k, v in answers.items()
+        if k in known and k not in _CONFIRM_LABEL_SKIP and v is not None
+    ]
     return " ".join(parts) or "(no args)"
 
 

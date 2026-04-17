@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.7 · progress bars on long ops, TLS warning dedup, better confirm label
+
+### Added
+- **Rich progress bar on `pais kb purge` and `pais index purge`.** A spinner, `N of M` counter, and the current index name (for KB purge) render in place while documents are being deleted. A 250-doc purge now shows `123/250 · index_name · 0:00:04` instead of silent terminal staring. Skipped automatically when `--output` isn't `table` or stdout isn't a TTY — JSON consumers and piped output get no ANSI noise.
+- **SDK `on_progress` callback on `Indexes.purge(...)` and `KnowledgeBases.purge(...)`.** Signature: `Callable[[str, ...], None]`. Events emitted:
+  - `Indexes.purge`: `collected(total)` → `deleted(deleted, total, doc_id, origin)` × N → `done(deleted, errors, strategy_used)` (plus `error(...)` for non-fallback failures).
+  - `KnowledgeBases.purge` wraps each nested call with `index_start(index_id, index_name, i, n)` / `index_done(index_id, deleted)`.
+  - Any exception raised by the callback is swallowed — a buggy UI must not corrupt a destructive op (test: `test_purge_on_progress_swallows_callback_exceptions`).
+- `src/pais/cli/_purge_progress.py` — reusable Rich `Progress` context manager any future purge-like command can use.
+- Tests: `test_purge_on_progress_callback_counts_match`, `test_purge_on_progress_swallows_callback_exceptions`, `test_kb_purge_emits_index_start_and_index_done`, plus 4 in `test_transport_tls_warning.py`.
+
+### Fixed
+- **`pais.tls.verification_disabled` WARNING fired per transport construction** — in an interactive session that's ≥ 3 emissions per workflow. Now dedup'd: warned once per `(process, base_url)` via a module-level set in `src/pais/transport/httpx_transport.py`. Different hosts still each get one advisory.
+- **Destructive confirm showed `(no args)`** even after the user picked a KB/index via a picker. `_confirmation_label` used to filter by typer's `kind == "argument"` classification, which misses picker-answered options. Now surfaces every answered param (minus the `yes` / `output` / `epoch` presentation flags), so the confirm reads `Really kb purge kb_id='…'?` as expected.
+
+### Migration
+- SDK embedders who pass positional args to `Indexes.purge(kb, ix, "auto")` keep working — `on_progress` is an optional keyword-only arg.
+
 ## 0.6.6 · `kb prune` paginates, prompts default-selected, quieter by default
 
 ### Fixed
