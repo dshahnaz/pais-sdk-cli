@@ -41,6 +41,9 @@ from pais.cli._workflows._base import (
 )
 from pais.config import Settings
 from pais.errors import PaisError
+from pais.logging import get_logger
+
+log = get_logger("pais.cli.shell")
 
 # Commands that require a confirm prompt before dispatch + auto-pass yes=True.
 _DESTRUCTIVE: frozenset[tuple[str, ...]] = frozenset(
@@ -112,8 +115,19 @@ def enter_interactive(app: typer.Typer) -> None:
             except KeyboardInterrupt:
                 console.print("\n[dim]aborted; back to menu[/dim]\n")
             except PaisError as e:
+                log.error(
+                    "shell.command_failed",
+                    command=" ".join(choice.path),
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
                 console.print(f"[red]error:[/red] {e}\n")
             except Exception as e:  # pragma: no cover
+                log.exception(
+                    "shell.command_crashed",
+                    command=" ".join(choice.path),
+                    error_type=type(e).__name__,
+                )
                 console.print(f"[red]error:[/red] {type(e).__name__}: {e}\n")
             continue
 
@@ -124,8 +138,19 @@ def enter_interactive(app: typer.Typer) -> None:
         except KeyboardInterrupt:
             console.print("\n[dim]aborted; back to menu[/dim]\n")
         except PaisError as e:
+            log.error(
+                "shell.workflow_failed",
+                workflow=type(workflow).__name__,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             console.print(f"[red]error:[/red] {e}\n")
         except Exception as e:  # pragma: no cover
+            log.exception(
+                "shell.workflow_crashed",
+                workflow=type(workflow).__name__,
+                error_type=type(e).__name__,
+            )
             console.print(f"[red]error:[/red] {type(e).__name__}: {e}\n")
 
 
@@ -244,8 +269,14 @@ def _dispatch(spec: CommandSpec, settings: Settings, console: Console) -> None:
     # Call the callback outside the client `with` so the command can build its
     # own client (the dispatched commands all do `with _client() as c: ...`).
     console.print(f"\n[bold]→ {spec.display}[/bold]\n")
+    # Pickers may stash scratch state (e.g. `kb_ref` for the KB→index cascade)
+    # into `ctx.answers` that the callback itself does not declare as a param.
+    # Filter to declared names so those scratch keys don't leak through as
+    # unexpected kwargs (regression from v0.7.2).
+    declared = {p.name for p in spec.params}
+    call_kwargs = {k: v for k, v in answers.items() if k in declared}
     try:
-        spec.callback(**answers)
+        spec.callback(**call_kwargs)
     except typer.Exit as e:
         if e.exit_code:
             console.print(f"[yellow](command exited with code {e.exit_code})[/yellow]")

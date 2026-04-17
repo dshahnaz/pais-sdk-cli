@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3 · `agent create` kb_ref leak; log shell exceptions to file
+
+### Fixed
+
+- **`pais agent create` no longer crashes with `TypeError: agent_create() got an unexpected keyword argument 'kb_ref'`.** Regression from v0.7.2: the KB→index picker cascade stashes the picked KB into `PickerContext.answers["kb_ref"]` as scratch state, but the interactive dispatcher then fed the full `answers` dict through `spec.callback(**answers)` — and `agent_create` declares no `kb_ref` parameter. The dispatcher now filters `answers` to the set of declared `spec.params` before invoking, so any picker's scratch keys stay contained. Defense-in-depth — future pickers that stash side-channel state won't regress the same way.
+- **Interactive shell failures now land in `~/.pais/logs/pais.log`.** Previously the top-level exception handlers in `enter_interactive` only printed `error: …` to the console; the traceback never reached the rotating file handler, so `pais doctor` / `pais logs tail` couldn't recover it for support. Both the flat-menu dispatch path and the workflow path now emit `shell.command_crashed` / `shell.workflow_crashed` (with full traceback) via the existing structlog logger before printing.
+
 ## 0.7.2 · `agent create` KB→index picker cascade; hidden-param OptionInfo leak
 
 ### Fixed
