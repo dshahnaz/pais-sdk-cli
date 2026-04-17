@@ -201,6 +201,145 @@ def test_agent_create_flow_picks_kb_then_index(
     # kb_search_tool:` branch in agent_create trips and pydantic blows up on
     # ToolLink(tool_id=<OptionInfo>).
     assert captured.get("kb_search_tool") is None
+    # Regression v0.7.3: the cascade stashes `kb_ref` into ctx.answers as scratch
+    # state; it must NOT leak through as a kwarg to `agent_create` (which has no
+    # such param). Dispatch filters by spec.params before calling the callback.
+    assert "kb_ref" not in captured, (
+        "kb_ref scratch key must not leak into callback kwargs (v0.7.3 regression)"
+    )
+
+
+def test_dispatch_filters_picker_scratch_keys(
+    fake_q: _FakeQuestionary,
+    isolated_cache: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defense-in-depth: a picker that stashes an arbitrary scratch key into
+    `ctx.answers` must not crash the callback with an unexpected-kwarg TypeError.
+    The fix filters `answers` to declared `spec.params` before invoking."""
+    from rich.console import Console
+
+    from pais.cli._pickers import CANCEL as PICKER_CANCEL
+    from pais.cli._workflows import _base as _workflows_base
+    from pais.cli.interactive import _dispatch
+
+    store = Store()
+    seed_client = PaisClient(FakeTransport(store))
+    kb = seed_client.knowledge_bases.create(KnowledgeBaseCreate(name="kb-scratch"))
+    seed_client.indexes.create(
+        kb.id,
+        IndexCreate(name="ix-scratch", embeddings_model_endpoint="BAAI/bge-small-en-v1.5"),
+    )
+
+    def _build(_self: Any) -> PaisClient:
+        return PaisClient(FakeTransport(store))
+
+    monkeypatch.setattr(Settings, "build_client", _build)
+    monkeypatch.setattr(_workflows_base, "questionary", fake_q)
+
+    specs = walk(app)
+    spec = next(s for s in specs if s.path == ("agent", "create"))
+
+    # Strict callback — only accepts declared params. If any scratch key leaks
+    # through, Python raises TypeError and the test fails.
+    received: dict[str, Any] = {}
+
+    def _strict(
+        name: str,
+        model: str,
+        instructions: str | None = None,
+        index_id: str | None = None,
+        index_top_n: int = 5,
+        index_similarity_cutoff: float = 0.0,
+        kb_search_tool: Any = None,
+        output: str = "table",
+    ) -> None:
+        received.update(
+            {
+                "name": name,
+                "model": model,
+                "index_id": index_id,
+            }
+        )
+
+    spec.callback = _strict  # type: ignore[misc]
+
+    # Override the index picker to stash a bogus scratch key, then also write a
+    # legitimate index_id answer. This simulates any current or future picker
+    # that uses ctx.answers as a side-channel.
+    def _picker_with_scratch(_path: tuple[str, ...], param_name: str) -> Any:
+        if param_name != "index_id":
+            return None
+
+        def _inner(ctx: Any) -> Any:
+            ctx.answers["kb_ref"] = kb.id
+            ctx.answers["__bogus_scratch__"] = "leak-me"
+            idx = seed_client.indexes.list(kb.id).data[0]
+            return idx.id
+
+        return _inner
+
+    monkeypatch.setattr("pais.cli.interactive.picker_for", _picker_with_scratch)
+
+    fake_q.script(
+        "my-agent",
+        "openai/gpt-oss-120b-4x  ·  VLLM",
+        "✅ Go (commit)",
+    )
+
+    # Must not raise TypeError.
+    _dispatch(spec, Settings(), Console())
+
+    assert received["name"] == "my-agent"
+    assert PICKER_CANCEL is not None  # import sanity
+
+
+def test_shell_logs_command_exceptions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When a dispatched command raises, the top-level shell loop must log it
+    (v0.7.3). Without this, tracebacks never reach `~/.pais/logs/pais.log` and
+    `pais doctor` / `pais logs tail` can't recover them for support.
+
+    We exercise the exception path by stubbing `_dispatch` to raise, then
+    driving `enter_interactive` through one flat-menu iteration + quit. The
+    assertion is on `interactive.log` which is the structlog logger the fix
+    added at module scope."""
+
+    logged: list[tuple[str, str, dict[str, Any]]] = []
+
+    class _RecorderLogger:
+        def error(self, event: str, **kw: Any) -> None:
+            logged.append(("error", event, kw))
+
+        def exception(self, event: str, **kw: Any) -> None:
+            logged.append(("exception", event, kw))
+
+    monkeypatch.setattr(interactive, "log", _RecorderLogger())
+
+    def _boom(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("synthetic failure for logging regression test")
+
+    monkeypatch.setattr(interactive, "_dispatch", _boom)
+
+    fq = _FakeQuestionary()
+    # Landing → flat menu pick (any non-quit) → after boom, back to landing → quit.
+    specs = walk(app)
+    first_non_quit = next(
+        f"{s.display:24s}  {s.help or '—'}" for s in specs if s.path == ("kb", "list")
+    )
+    fq.script(
+        "📋  all commands…",
+        first_non_quit,
+        "📋  all commands…",
+        "⏏  quit",
+    )
+    monkeypatch.setattr(interactive, "questionary", fq)
+    monkeypatch.setattr(_landing, "questionary", fq)
+
+    interactive.enter_interactive(app)
+
+    assert any(evt == "shell.command_crashed" for _, evt, _ in logged), (
+        f"RuntimeError from a dispatched command must be logged, got: {logged}"
+    )
 
 
 def test_picker_status_label_lookup(fake_q: _FakeQuestionary, isolated_cache: None) -> None:
