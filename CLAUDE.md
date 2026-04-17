@@ -11,18 +11,29 @@ Python SDK + `pais` CLI for **VMware Private AI Service (PAIS)**, with a bundled
 - `src/pais/` — SDK
   - `client.py` — `PaisClient` facade
   - `resources/*.py` — one file per PAIS resource group (knowledge_bases, indexes, agents, …)
-  - `models/*.py` — contract-first pydantic models, shared with the mock
+  - `models/*.py` — contract-first pydantic models, shared with the mock; **all status fields are `str`** (not Enum) per the doc contract — Enum classes kept as named constants
   - `transport/{base,httpx_transport,fake_transport}.py` — Transport protocol + 2 impls
   - `auth/{base,none,bearer,oidc_password}.py` — pluggable auth strategies
-  - `ingest/registry.py` + `ingest/splitters/*.py` — splitter plug-in system (4 built-ins)
+  - `ingest/registry.py` + `ingest/splitters/*.py` — splitter plug-in system (4 built-ins, each with `SplitterMeta`)
   - `ingest/runner.py` — generic ingest pipeline (worker pool, JSON report)
-  - `cli/app.py` — `pais` typer entrypoint
-  - `cli/{ingest_cmd,ensure_cmd,config_cmd,_alias,_kb_show,_config_file,_profile_config,_output}.py`
-  - `dev/{markdown,split_suite,token_budget,ingest}.py` — legacy helpers wrapped by `pais.ingest.splitters.test_suite_md`; `cli/dev.py` is now a removal-redirect shim
+  - `cli/app.py` — `pais` typer entrypoint (interactive shell on bare `pais` in TTY)
+  - `cli/interactive.py` — interactive shell menu loop + flat command fallback
+  - `cli/_landing.py` — smart landing screen (env state + recommended workflow)
+  - `cli/_introspect.py` — walks typer command tree for the shell menu
+  - `cli/_pickers.py` — context-aware ref pickers (pick_kb, pick_index, pick_agent, pick_or_create_* variants, with ★ recents + `← back`)
+  - `cli/_prompts.py` — type-aware prompt builders for the shell
+  - `cli/_recent.py` — per-profile LRU cache of recently-used aliases
+  - `cli/_config_writeback.py` — safe append-only TOML writeback (workflows save aliases to `pais.toml`)
+  - `cli/_splitter_preview.py` — dry-run splitter against a file (tokens + chars)
+  - `cli/_workflows/` — 7 task-centric workflows (setup_agent, ingest_data, setup_kb, bootstrap_toml, chat, search, cleanup)
+  - `cli/_flags.py` — shared `typer.Option` constants with long+short forms
+  - `cli/{ingest_cmd,ensure_cmd,config_cmd,status_cmd,shell_cmd,doctor_cmd,logs_cmd}.py` — subcommands
+  - `cli/{_alias,_kb_show,_config_file,_profile_config,_output}.py` — helpers
+  - `dev/{markdown,split_suite,token_budget,ingest}.py` — legacy helpers; `cli/dev.py` is a removal-redirect shim (console-script entry removed in v0.5.0)
   - `config.py` — pydantic-settings: env > config-file profile > .env > defaults
-  - `errors.py`, `logging.py`
-- `src/pais_mock/{server,state,behaviors}.py` — FastAPI mock + in-memory `Store` (implements the same protocol that `FakeTransport` consumes; tests + the standalone `python -m pais_mock` server share it)
-- `tests/` — 155+ tests across contract, transport, auth, resources, CLI, ingest, alias resolver, ensure, etc. Coverage gate: ≥ 85 % on touched modules; we sit at ~91 %.
+  - `errors.py` (includes `IndexDeleteUnsupported`), `logging.py`
+- `src/pais_mock/{server,state,behaviors}.py` — FastAPI mock + in-memory `Store`; emits doc-aligned wire shapes (`{chunks: [...]}` for search, `{deleted: true}` for KB/agent delete)
+- `tests/` — 309 tests across contract, transport, auth, resources, CLI, ingest, alias resolver, ensure, interactive, workflows, pickers, landing, recent, config writeback, splitter meta/preview, search doc shape, index delete, cleanup verify, doctor, logs, relaxed enums. Coverage gate: ≥ 85 % on touched modules.
 - `docs/` — `ingestion.md`, `architecture.md`, `migration-0.3-to-0.4.md`, `v0.4-plan.md`
 - `.github/workflows/ci.yml` — matrix Python 3.10 / 3.11 / 3.12
 
@@ -63,9 +74,15 @@ uv run ruff format --check       # use `uv run ruff format` to fix
 uv run mypy src
 uv run pytest -q
 uv run pytest --cov=src/pais -q  # with coverage
+
+# troubleshooting
+pais doctor                      # one-shot diagnostic probe battery
+pais logs path                   # where's the log file?
+pais logs tail -n 50             # last 50 lines
+pais -v                          # shell with full INFO logs
 ```
 
-## Release / publish ritual (followed for v0.3.0, v0.3.1, v0.4.0 — keep doing this)
+## Release / publish ritual (followed for v0.1–v0.6.5; keep doing this)
 
 1. Branch: `git checkout -b feat/<short-name>` (or `fix/…`, `chore/…`).
 2. Make changes. Add tests. Update docs (every user-facing change → README + CHANGELOG).
