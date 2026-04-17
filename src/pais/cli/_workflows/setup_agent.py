@@ -27,6 +27,9 @@ from pais.cli._config_writeback import (
 from pais.cli._pickers import (
     CREATE_NEW,
     PickerContext,
+    first_model_id,
+    pick_chat_model,
+    pick_embeddings_model,
     pick_or_create_index,
     pick_or_create_kb,
 )
@@ -187,8 +190,9 @@ def run(client: PaisClient, settings: Settings, console: Console) -> None:
                 FieldSpec(name="name", value=f"ix_{_stamp()}"),
                 FieldSpec(
                     name="embeddings_model_endpoint",
-                    value="BAAI/bge-small-en-v1.5",
-                    hint="small, fast, English-only",
+                    value=first_model_id(ctx, kind="EMBEDDINGS") or "BAAI/bge-small-en-v1.5",
+                    hint="pick from server-advertised embeddings models",
+                    re_prompt=lambda _v: pick_embeddings_model(ctx),
                 ),
                 FieldSpec(
                     name="text_splitting",
@@ -292,8 +296,9 @@ def run(client: PaisClient, settings: Settings, console: Console) -> None:
             FieldSpec(name="name", value=f"agent_{_stamp()}"),
             FieldSpec(
                 name="model",
-                value="openai/gpt-oss-120b-4x",
-                hint="default chat model on most PAIS deployments",
+                value=first_model_id(ctx, kind="COMPLETIONS") or "openai/gpt-oss-120b-4x",
+                hint="pick from server-advertised chat models",
+                re_prompt=lambda _v: pick_chat_model(ctx),
             ),
             FieldSpec(
                 name="instructions",

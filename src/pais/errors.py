@@ -49,6 +49,14 @@ class PaisError(Exception):
         if self.details:
             codes = ",".join(d.error_code or "?" for d in self.details)
             parts.append(f"codes=[{codes}]")
+            # Surface the first detail's field path + message so 422
+            # validation errors are actionable without digging into logs.
+            # `value` is deliberately excluded — can contain request payload
+            # bits we don't want in terminal output.
+            first = self.details[0]
+            if first.loc or first.msg:
+                loc = ".".join(str(x) for x in (first.loc or []))
+                parts.append(f"detail={loc}: {first.msg or '—'}")
         return " | ".join(parts)
 
 

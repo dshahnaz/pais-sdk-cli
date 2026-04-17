@@ -155,5 +155,119 @@ def test_picker_for_dispatch_table() -> None:
     assert picker_for(("agent", "chat"), "agent_id") is not None
     assert picker_for(("splitters", "show"), "kind") is not None
     assert picker_for(("alias", "clear"), "alias") is not None
+    # Model pickers (v0.6.8).
+    assert picker_for(("index", "create"), "embeddings_model") is not None
+    assert picker_for(("agent", "create"), "model") is not None
     # Unknown param → no picker.
     assert picker_for(("kb", "create"), "name") is None
+
+
+# ----- model pickers (v0.6.8) ------------------------------------------------
+
+
+def test_pick_embeddings_model_filters_by_type(fake_q: _FakeQuestionary) -> None:
+    """The mock store seeds 1 EMBEDDINGS + 2 COMPLETIONS models; picker shows
+    only the embeddings row."""
+    from pais.cli._pickers import pick_embeddings_model
+
+    client = PaisClient(FakeTransport(Store()))
+    ctx = PickerContext(client=client, answers={}, profile="default")
+
+    captured_choices: list[Any] = []
+
+    def _select(message: str, *, choices: list[Any], **_: Any) -> _FakeAsk:
+        captured_choices.extend(choices)
+        return _FakeAsk(choices[0])
+
+    fake_q.select = _select  # type: ignore[method-assign]
+    result = pick_embeddings_model(ctx)
+    assert result == "BAAI/bge-small-en-v1.5"
+    # Only the embeddings model shows as a model row — no gpt-oss / llama-cpp.
+    model_rows = [c for c in captured_choices if isinstance(c, str) and "·" in c]
+    assert len(model_rows) == 1
+    assert "BAAI/bge-small-en-v1.5" in model_rows[0]
+
+
+def test_pick_chat_model_filters_by_type(fake_q: _FakeQuestionary) -> None:
+    from pais.cli._pickers import pick_chat_model
+
+    client = PaisClient(FakeTransport(Store()))
+    ctx = PickerContext(client=client, answers={}, profile="default")
+
+    captured_choices: list[Any] = []
+
+    def _select(message: str, *, choices: list[Any], **_: Any) -> _FakeAsk:
+        captured_choices.extend(choices)
+        return _FakeAsk(choices[0])
+
+    fake_q.select = _select  # type: ignore[method-assign]
+    result = pick_chat_model(ctx)
+    # The first COMPLETIONS model in the mock is gpt-oss.
+    assert result == "openai/gpt-oss-120b-4x"
+    model_rows = [c for c in captured_choices if isinstance(c, str) and "·" in c]
+    assert len(model_rows) == 2  # gpt-oss + llama-cpp
+    assert any("BAAI/bge-small-en-v1.5" not in r for r in model_rows)
+
+
+def test_pick_model_falls_back_to_manual_when_list_empty(fake_q: _FakeQuestionary) -> None:
+    """Empty server list → text-prompt fallback, not a crash."""
+    from pais.cli._pickers import pick_embeddings_model
+
+    class _EmptyModels:
+        def list(self) -> Any:
+            class _R:
+                def __init__(self) -> None:
+                    self.data: list[Any] = []
+
+            return _R()
+
+    client = PaisClient(FakeTransport(Store()))
+    client.models = _EmptyModels()  # type: ignore[assignment]
+    ctx = PickerContext(client=client, answers={}, profile="default")
+
+    fake_q.script("manual-model-id")
+    result = pick_embeddings_model(ctx)
+    assert result == "manual-model-id"
+    assert fake_q.calls[-1]["kind"] == "text"
+    assert "no embeddings models" in fake_q.calls[-1]["message"]
+
+
+def test_pick_model_falls_back_on_paiserror(fake_q: _FakeQuestionary) -> None:
+    """Server error → same text-prompt fallback, picker never crashes."""
+    from pais.cli._pickers import pick_chat_model
+
+    class _BoomModels:
+        def list(self) -> Any:
+            raise PaisServerError("simulated outage", status_code=500)
+
+    client = PaisClient(FakeTransport(Store()))
+    client.models = _BoomModels()  # type: ignore[assignment]
+    ctx = PickerContext(client=client, answers={}, profile="default")
+
+    fake_q.script("typed-model-id")
+    result = pick_chat_model(ctx)
+    assert result == "typed-model-id"
+    assert fake_q.calls[-1]["kind"] == "text"
+    assert "could not list models" in fake_q.calls[-1]["message"]
+
+
+def test_first_model_id_returns_first_matching_kind() -> None:
+    from pais.cli._pickers import first_model_id
+
+    client = PaisClient(FakeTransport(Store()))
+    ctx = PickerContext(client=client, answers={}, profile="default")
+    assert first_model_id(ctx, kind="EMBEDDINGS") == "BAAI/bge-small-en-v1.5"
+    assert first_model_id(ctx, kind="COMPLETIONS") == "openai/gpt-oss-120b-4x"
+
+
+def test_first_model_id_returns_none_on_error() -> None:
+    from pais.cli._pickers import first_model_id
+
+    class _BoomModels:
+        def list(self) -> Any:
+            raise PaisServerError("boom", status_code=503)
+
+    client = PaisClient(FakeTransport(Store()))
+    client.models = _BoomModels()  # type: ignore[assignment]
+    ctx = PickerContext(client=client, answers={}, profile="default")
+    assert first_model_id(ctx, kind="EMBEDDINGS") is None
