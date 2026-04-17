@@ -105,7 +105,7 @@ class HttpxTransport:
         request_id = current_request_id() or new_request_id()
         merged = self._build_headers(headers, request_id)
         started = time.perf_counter()
-        _log.info(
+        _log.debug(
             "pais.request",
             method=method,
             path=path,
@@ -119,7 +119,7 @@ class HttpxTransport:
                     resp.status_code, body, request_id=resp.headers.get("X-Request-ID")
                 )
             yield from resp.iter_bytes()
-        _log.info(
+        _log.debug(
             "pais.request.stream_done",
             method=method,
             path=path,
@@ -213,7 +213,9 @@ class HttpxTransport:
             body = self._parse_body(resp.content)
             resp_request_id = resp.headers.get("X-Request-ID") or request_id
 
-            _log.info(
+            # Successful requests at DEBUG; `-v` (INFO) covers retry/timeout
+            # warnings only. Run at `-vv` (DEBUG) to see every request.
+            _log.debug(
                 "pais.request",
                 method=method,
                 path=path,

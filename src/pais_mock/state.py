@@ -263,7 +263,7 @@ class Store:
         if path.startswith("/control/data-sources"):
             return self._data_sources_route(method, path, json)
         if path.startswith("/control/knowledge-bases"):
-            return self._kb_route(method, path, json, files)
+            return self._kb_route(method, path, json, params, files)
         raise _HttpError(404, {"detail": f"no route: {method} {path}"})
 
     # --- MCP tools ------------------------------------------------------------
@@ -282,6 +282,7 @@ class Store:
         method: str,
         path: str,
         json: Any,
+        params: dict[str, Any] | None,
         files: dict[str, tuple[str, IO[bytes], str]] | None,
     ) -> Any:
         m = _KB_RE.match(path)
@@ -319,7 +320,7 @@ class Store:
             raise _HttpError(405, {"detail": f"method not allowed: {method}"})
 
         # Nested: /indexes/... or /data-sources
-        return self._kb_nested(method, kb, rest, json, files)
+        return self._kb_nested(method, kb, rest, json, params, files)
 
     def _create_kb(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not payload.get("name"):
@@ -348,6 +349,7 @@ class Store:
         kb: _KBRecord,
         rest: str,
         json: Any,
+        params: dict[str, Any] | None,
         files: dict[str, tuple[str, IO[bytes], str]] | None,
     ) -> Any:
         if rest == "/data-sources":
@@ -413,12 +415,7 @@ class Store:
             # /documents OR /documents/{document_id}
             if len(parts) == 2:
                 if method == "GET":
-                    return {
-                        "object": "list",
-                        "data": [d.to_json() for d in ix.documents.values()],
-                        "has_more": False,
-                        "num_objects": len(ix.documents),
-                    }
+                    return self._list_documents_page(ix, params)
                 if method == "POST":
                     return self._upload_document(ix, files)
                 raise _HttpError(405, {"detail": f"method not allowed: {method}"})
@@ -537,6 +534,47 @@ class Store:
             finished_at=now,
         )
         return doc.to_json()
+
+    def _list_documents_page(
+        self, ix: _IndexRecord, params: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Cursor-paginated document list.
+
+        Honors ?limit=N&after=<doc_id>. Defaults mimic a typical PAIS server:
+        `limit` defaults to 100, `after` is the cursor from the previous page's
+        `last_id`. Response always includes `has_more` and, when more pages
+        remain, `first_id` + `last_id`.
+        """
+        q = params or {}
+        try:
+            limit = int(q.get("limit", 100))
+        except (TypeError, ValueError):
+            limit = 100
+        limit = max(1, min(limit, 1000))
+        after = q.get("after")
+
+        all_docs = list(ix.documents.values())  # insertion order == creation order
+        start = 0
+        if after:
+            for i, d in enumerate(all_docs):
+                if d.id == after:
+                    start = i + 1
+                    break
+            else:
+                # Cursor not found — treat as an empty tail, same as real servers.
+                start = len(all_docs)
+        page = all_docs[start : start + limit]
+        has_more = start + limit < len(all_docs)
+        body: dict[str, Any] = {
+            "object": "list",
+            "data": [d.to_json() for d in page],
+            "has_more": has_more,
+            "num_objects": len(all_docs),
+        }
+        if page:
+            body["first_id"] = page[0].id
+            body["last_id"] = page[-1].id
+        return body
 
     def _trigger_indexing(self, ix: _IndexRecord) -> dict[str, Any]:
         ixn_id = f"ixn_{next(self._ixn_ids)}"

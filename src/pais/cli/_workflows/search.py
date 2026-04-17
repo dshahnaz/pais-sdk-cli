@@ -12,7 +12,16 @@ from pais.cli import _alias
 from pais.cli._config_file import load_profile_config
 from pais.cli._pickers import PickerContext, pick_index, pick_kb
 from pais.cli._prompts import CANCEL
-from pais.cli._workflows._base import Workflow, branch_yes_no
+from pais.cli._workflows._base import (
+    BACK,
+    FieldSpec,
+    ReviewSpec,
+    Workflow,
+    prompt_review_screen,
+)
+from pais.cli._workflows._base import (
+    CANCEL as REVIEW_CANCEL,
+)
 from pais.client import PaisClient
 from pais.config import Settings
 from pais.models import SearchQuery
@@ -50,16 +59,33 @@ def run(
     query = questionary.text("query:").ask()
     if not query:
         return
-    top_n = 5
-    cutoff = 0.0
-    if branch_yes_no("Customize top_n / similarity_cutoff?", default=False):
-        top_n_str = questionary.text("top_n:", default="5").ask()
-        cutoff_str = questionary.text("similarity_cutoff:", default="0.0").ask()
-        try:
-            top_n = int(top_n_str or "5")
-            cutoff = float(cutoff_str or "0.0")
-        except ValueError:
-            console.print("[red]invalid number; using defaults[/red]")
+
+    # Review screen: both knobs visible with sensible defaults. Press Enter
+    # on "Go" to accept and run; pick "Edit …" only if you actually want to
+    # change one. No more "customize? y/n" gate.
+    review = ReviewSpec(
+        title=f"🔎 Search — review (query: {query!r})",
+        fields=[
+            FieldSpec(
+                name="top_n",
+                value=5,
+                hint="how many hits to return (default 5)",
+                re_prompt=_reprompt_int("top_n", 5),
+            ),
+            FieldSpec(
+                name="similarity_cutoff",
+                value=0.0,
+                hint="drop hits below this score; 0.0 = keep everything",
+                re_prompt=_reprompt_float("similarity_cutoff", 0.0),
+            ),
+        ],
+    )
+    result = prompt_review_screen(review, console)
+    if result is BACK or result is REVIEW_CANCEL:
+        return
+    assert isinstance(result, dict)
+    top_n = int(result["top_n"])
+    cutoff = float(result["similarity_cutoff"])
 
     try:
         res = client.indexes.search(
@@ -87,6 +113,42 @@ def run(
             snippet = snippet[:200] + "…"
         table.add_row(f"{hit.score:.3f}", hit.origin_name or "—", snippet)
     console.print(table)
+
+
+def _reprompt_int(name: str, fallback: int):  # type: ignore[no-untyped-def]
+    def _go(current: Any) -> int:
+        ans = questionary.text(
+            f"{name}:",
+            default=str(current),
+            validate=lambda v: v.strip().lstrip("-").isdigit() or "must be an integer",
+        ).ask()
+        if ans is None or ans.strip() == "":
+            return int(current) if current is not None else fallback
+        return int(ans)
+
+    return _go
+
+
+def _reprompt_float(name: str, fallback: float):  # type: ignore[no-untyped-def]
+    def _go(current: Any) -> float:
+        ans = questionary.text(
+            f"{name}:",
+            default=str(current),
+            validate=lambda v: _is_float(v) or "must be a number (e.g. 0.0, 0.35)",
+        ).ask()
+        if ans is None or ans.strip() == "":
+            return float(current) if current is not None else fallback
+        return float(ans)
+
+    return _go
+
+
+def _is_float(v: str) -> bool:
+    try:
+        float(v)
+    except ValueError:
+        return False
+    return True
 
 
 WORKFLOW = Workflow(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, Literal
@@ -99,9 +100,65 @@ class IndexesResource(Resource[Index]):
             raise
 
     # ---- Documents -----------------------------------------------------------
-    def list_documents(self, kb_id: str, index_id: str) -> ListResponse[Document]:
-        raw = self._get_json(f"{self._path_for_kb(kb_id)}/{index_id}/documents")
+    def list_documents(
+        self,
+        kb_id: str,
+        index_id: str,
+        *,
+        limit: int | None = None,
+        after: str | None = None,
+    ) -> ListResponse[Document]:
+        """Single-page list. Honors cursor pagination via `limit` + `after`.
+
+        Most callers should prefer `iter_documents()` which transparently
+        follows `has_more` / `last_id`. This single-page method is kept for
+        thin wire-level checks.
+        """
+        params: dict[str, Any] = {}
+        if limit is not None:
+            params["limit"] = limit
+        if after is not None:
+            params["after"] = after
+        raw = self._get_json(
+            f"{self._path_for_kb(kb_id)}/{index_id}/documents",
+            params=params or None,
+        )
         return ListResponse[Document].model_validate(raw)
+
+    def iter_documents(
+        self,
+        kb_id: str,
+        index_id: str,
+        *,
+        limit: int = 100,
+        max_pages: int = 1000,
+    ) -> Iterator[Document]:
+        """Iterate every document in an index, following `has_more` + `last_id`.
+
+        Mirrors `Resource.list_all` but for the KB-scoped documents endpoint.
+        `max_pages` is a hard cap defending against a server that mis-reports
+        `has_more=True` forever — raises RuntimeError if hit.
+        """
+        after: str | None = None
+        for _ in range(max_pages):
+            page = self.list_documents(kb_id, index_id, limit=limit, after=after)
+            yield from page.data
+            if not page.has_more:
+                return
+            if page.last_id:
+                after = page.last_id
+                continue
+            if page.data:
+                last_doc = page.data[-1]
+                after = getattr(last_doc, "id", None)
+                if after is None:
+                    return
+                continue
+            return
+        raise RuntimeError(
+            f"iter_documents exceeded max_pages={max_pages} for index {index_id}; "
+            "server may be mis-reporting has_more"
+        )
 
     def delete_document(self, kb_id: str, index_id: str, document_id: str) -> None:
         """DELETE a single document by id. Not in the public PAIS docs but most
@@ -216,18 +273,23 @@ class IndexesResource(Resource[Index]):
                 )
             return self._purge_recreate(kb_id, index_id)
 
-        docs = list(self.list_documents(kb_id, index_id).data)
-        if match_origin_prefix is not None:
-            docs = [d for d in docs if d.origin_name.startswith(match_origin_prefix)]
+        # Collect every matching doc id up front — paginating the listing — then
+        # delete. Deleting while iterating would invalidate the server-side cursor
+        # (the last_id we'd follow may be the doc we just deleted), so we snapshot
+        # IDs first.
+        targets: list[tuple[str, str]] = []
+        for doc in self.iter_documents(kb_id, index_id):
+            if match_origin_prefix is None or doc.origin_name.startswith(match_origin_prefix):
+                targets.append((doc.id, doc.origin_name))
 
-        if not docs:
+        if not targets:
             return PurgeResult(strategy_used="api", documents_deleted=0)
 
         deleted = 0
         errors: list[str] = []
-        for i, doc in enumerate(docs):
+        for i, (doc_id, _origin) in enumerate(targets):
             try:
-                self.delete_document(kb_id, index_id, doc.id)
+                self.delete_document(kb_id, index_id, doc_id)
                 deleted += 1
             except (PaisNotFoundError, PaisError) as e:
                 # On the FIRST attempt, treat 404/405 as endpoint-missing and fall back.
@@ -248,14 +310,14 @@ class IndexesResource(Resource[Index]):
                 if strategy == "api" and _is_endpoint_missing(e):
                     errors.append(
                         f"PAIS deployment does not expose DELETE /documents/{{id}} "
-                        f"(error on first doc {doc.id}: {e})"
+                        f"(error on first doc {doc_id}: {e})"
                     )
                     return PurgeResult(
                         strategy_used="api",
                         documents_deleted=deleted,
                         errors=errors,
                     )
-                errors.append(f"{doc.id}: {type(e).__name__}: {e}")
+                errors.append(f"{doc_id}: {type(e).__name__}: {e}")
         return PurgeResult(strategy_used="api", documents_deleted=deleted, errors=errors)
 
     def _purge_recreate(self, kb_id: str, index_id: str) -> PurgeResult:
@@ -266,9 +328,11 @@ class IndexesResource(Resource[Index]):
         unavailable on those servers.
         """
         ix = self.get(kb_id, index_id)
-        deleted_count = self.list_documents(kb_id, index_id).num_objects
+        first_page = self.list_documents(kb_id, index_id)
+        deleted_count = first_page.num_objects
         if deleted_count is None:
-            deleted_count = len(self.list_documents(kb_id, index_id).data)
+            # Server didn't report a total; walk every page to get the real count.
+            deleted_count = sum(1 for _ in self.iter_documents(kb_id, index_id))
         try:
             self.delete(kb_id, index_id)
         except IndexDeleteUnsupported as e:

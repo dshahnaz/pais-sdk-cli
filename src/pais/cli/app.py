@@ -106,11 +106,16 @@ def _root(
         "-Q",
         help="Use y/N for destructive ops in the shell (skip type-to-confirm).",
     ),
-    verbose: bool = typer.Option(
-        False,
+    verbose: int = typer.Option(
+        0,
         "--verbose",
         "-v",
-        help="Show INFO-level logs (the interactive shell defaults to WARNING).",
+        count=True,
+        help=(
+            "Verbosity tier. Default (no flag) = WARNING; "
+            "-v = INFO (purge decisions, ingest start/done); "
+            "-vv = DEBUG (every HTTP request)."
+        ),
     ),
 ) -> None:
     """Pin --config / --profile so every subcommand's Settings() picks them up.
@@ -118,12 +123,25 @@ def _root(
     When invoked with no subcommand AND stdin is a TTY AND `--no-interactive`
     isn't set AND `PAIS_NONINTERACTIVE` env isn't set, drop into the
     interactive menu. Non-TTY callers (scripts, pipes) get the help banner.
+
+    Verbosity contract (applies to both interactive and non-interactive):
+      no flag → WARNING (only warnings/errors; e.g. TLS-verify-off, purge fallback)
+      -v     → INFO (high-signal events)
+      -vv    → DEBUG (per-request HTTP traces, full payloads)
     """
     set_runtime_overrides(config_path=config, profile=profile)
     if quick_confirm:
         os.environ["PAIS_QUICK_CONFIRM"] = "1"
-    if verbose:
-        os.environ["PAIS_VERBOSE"] = "1"
+    if verbose >= 1:
+        os.environ["PAIS_VERBOSE"] = str(verbose)
+
+    # Apply the verbosity tier eagerly — before any command runs — so even
+    # the first HTTP request respects it. Without this, users would only see
+    # log changes after the first `PaisClient.from_settings` call.
+    from pais.logging import configure_logging as _configure_logging
+
+    _cli_log_level = "WARNING" if verbose == 0 else ("INFO" if verbose == 1 else "DEBUG")
+    _configure_logging(level=_cli_log_level)
     # Eager validation: surface config-file errors here with a clean message
     # rather than letting them bubble up as a Python traceback later.
     from pais.cli._config_file import ConfigError, load_profile
