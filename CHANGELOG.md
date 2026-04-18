@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.8.0 · `pais repro` reproducible chat-experiment harness
+
+### Added
+
+- **`pais repro`** — one-command, non-interactive harness that stands up a fresh KB + index + agent from supplied fixtures, ingests the test-suites dir, runs every supplied prompt against the agent, and bundles per-prompt metrics + a doctor snapshot + chat-error JSONs + the rolling log into a single zip suitable for hand-off to infra or regression archival.
+
+  Inputs are flags only (no interactive steps). All defaults match the user's current PAIS deployment so the first run reproduces what's seen in production exactly:
+
+  ```bash
+  pais repro \
+    --suites-dir   ./test-suites/ \
+    --instructions ./instructions.md \
+    --prompts      ./prompts/per-pr/p20242.md \
+    --prompts      ./prompts/combined.md \
+    --max-tokens   2048 \
+    --output       /tmp/pais-repro.zip
+  ```
+
+  Bundle layout:
+  ```
+  manifest.json          # full recipe + KB/index/agent ids + summary table
+  responses/<file>.json  # per-prompt: prompt_tokens, completion_tokens,
+                         # finish_reason, latency_ms, response_text, errors
+  doctor.md              # environment + KB/index/agent inventory snapshot
+  chat-errors/*.json     # any 4xx/5xx auto-dumps that landed during the run
+  pais.log               # rolling structured log for the whole run
+  ```
+
+  Side-by-side comparison across prompts makes it trivial to tell scaffolding-vs-tokenizer-vs-RAG apart when diagnosing server-side amplification or truncation.
+
+  Resources are kept by default for inspection; pass `--cleanup` to delete the agent + KB after bundling. Instructions text is excluded from the bundle by default (only its byte length and SHA-256 land in the manifest); pass `--include-instructions` to ship the file too.
+
+### ⚠️ Behavior change — `ChatCompletionRequest` defaults
+
+- **`max_tokens` default changed from `500` to `None`**, and **`temperature` from `0.7` to `None`**, in `ChatCompletionRequest` (`src/pais/models/agent.py`). Same v0.7.4 pattern: `model_dump(exclude_none=True)` drops `None` but not numeric defaults, so the SDK was silently sending `max_tokens=500` on every chat request — capping completions at 500 tokens and producing `finish_reason=length` even when the user expected the model's full output.
+
+  After the change, the server's configured defaults take over unless the caller passes an explicit value. To restore the previous behavior in your code, pass `ChatCompletionRequest(messages=[…], max_tokens=500, temperature=0.7)` explicitly.
+
+  A new `tests/test_chat_request_wire_shape.py` pins the wire shape so this can't silently regress.
+
 ## 0.7.9 · `pais support-bundle` — one-command artifact zip
 
 ### Added
