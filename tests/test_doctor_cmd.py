@@ -63,3 +63,34 @@ def test_doctor_probe_failure_marked_with_x(runner: CliRunner) -> None:
     assert "server_reachable" in r.output
     # The command should still produce a report (partial success).
     assert "Report written" in r.output
+
+
+def test_doctor_json_includes_inventory_and_settings(runner: CliRunner) -> None:
+    """Inventory sections + non-secret settings ride in the JSON output."""
+    r = runner.invoke(cli_app, ["doctor", "-o", "json"])
+    data = json.loads(r.output.split("Report written")[0])
+
+    # Inventory buckets populated (mock mode has data for these).
+    assert "inventory" in data
+    assert "models" in data["inventory"]
+    assert len(data["inventory"]["models"]) >= 1
+    model_row = data["inventory"]["models"][0]
+    assert "id" in model_row and "model_type" in model_row
+
+    # Settings allowlisted — secrets must not appear.
+    assert "settings" in data
+    assert data["settings"]["mode"] == "mock"
+    assert "password" not in data["settings"]
+    assert "client_secret" not in data["settings"]
+    assert "bearer_token" not in data["settings"]
+
+
+def test_doctor_markdown_has_collapsible_sections(runner: CliRunner, tmp_path: Path) -> None:
+    """The written .md report includes the new <details> sections for inventory."""
+    runner.invoke(cli_app, ["doctor"])
+    doctor_files = sorted(tmp_path.glob("doctor-*.md"))
+    assert doctor_files
+    content = doctor_files[-1].read_text()
+    assert "<details>" in content
+    assert "Settings (non-secret)" in content
+    assert "models" in content

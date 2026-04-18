@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from pais.cli import _recent
+from pais.cli._error_dump import dump_chat_error
 from pais.cli._pickers import PickerContext, pick_agent
 from pais.cli._prompts import CANCEL
 from pais.cli._workflows._base import Workflow
@@ -97,6 +98,11 @@ def run(
             return
         except Exception as e:
             console.print(f"[red]error:[/red] {e}")
+            try:
+                dump_path = dump_chat_error(e, agent_id=agent_id, prompt=content, profile=profile)
+                console.print(f"[dim]full detail → {dump_path}[/dim]")
+            except Exception as dump_exc:
+                console.print(f"[dim](could not save error dump: {dump_exc})[/dim]")
             continue
         choice = resp.choices[0]
         text = choice.message.content or ""

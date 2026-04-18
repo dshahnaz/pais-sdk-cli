@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.8 · chat-error dumps + `pais doctor` inventory
+
+### Added
+
+- **Chat failures auto-save to `~/.pais/logs/chat-errors/<ts>-<request_id>.json`.** Every exception raised by `client.agents.chat(...)` — in both the `pais chat` REPL and the one-shot `pais agent chat` command — now writes a shareable JSON record: `status_code`, `request_id`, full `PaisError.details` list (codes + `loc` + `msg`), `agent_id`, `profile`, `pais_version`, and a **2000-char excerpt** of the prompt that triggered it (with `prompt_truncated` flag + original `prompt_bytes`). The REPL prints the saved path on screen; the one-shot emits it on stderr. Enough to paste straight into a support ticket without retyping or losing detail. Dir is created with mode `0o700`; atomic `.json.tmp` + `os.replace` write. Non-`PaisError` exceptions include a traceback instead of PAIS-specific fields.
+- **`pais doctor` now carries a full environment + inventory snapshot.** The existing probe battery still only counts resources on the probe row, but the new `inventory` block captures the actual records:
+  - `knowledge_bases` — `id, name, created_at`
+  - `indexes` — `id, kb_id, kb_name, name, embeddings_model, chunk_size, chunk_overlap, status` (flattened across KBs)
+  - `agents` — `id, name, model, index_id, index_top_n, session_max_length`
+  - `models` — `id, model_type, model_engine`
+  - `settings` — **allowlisted** non-secret settings only (`mode, base_url, auth, verify_ssl, timeouts, retry knobs, chat_retry_on_empty, log_level, profile`). Secrets (`password`, `client_secret`, `bearer_token`) are hard-excluded by name; pydantic's `SecretStr` renders as `"**********"` even on the allowlist as belt-and-suspenders.
+- The generated `doctor-*.md` report now has collapsible `<details>` sections per inventory bucket + a "Settings (non-secret)" table, so the whole thing stays paste-friendly. `pais doctor --output json` exposes the same data under `inventory` / `settings`.
+
+### Wire-up
+
+- New module `src/pais/cli/_error_dump.py` (~60 LOC) with `dump_chat_error(exc, *, agent_id, prompt, profile=None, dest_dir=None) -> Path`.
+- Dump failures are caught and reported as `[dim](could not save error dump: ...)[/dim]` — saving an error dump never hides the original error.
+- `DoctorReport` gained two fields (`inventory`, `settings_dump`) serialized through both `to_dict()` and `to_markdown()`.
+
 ## 0.7.7 · auto-retry empty chat 200s + `pais.response.chat` diagnostics
 
 ### Fixed

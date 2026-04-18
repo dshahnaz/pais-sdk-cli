@@ -123,3 +123,38 @@ def test_chat_file_shortcut_missing_file_continues(
 
     assert called["n"] == 0
     assert fq.scripted == []
+
+
+def test_chat_error_is_saved_to_disk(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """A failed chat turn writes a JSON dump under the errors dir and keeps the loop alive."""
+    import json as _json
+
+    from pais.cli import _error_dump
+    from pais.errors import PaisServerError
+
+    errors_dir = tmp_path / "chat-errors"
+    monkeypatch.setattr(_error_dump, "_CHAT_ERRORS_DIR", errors_dir)
+
+    store = Store()
+    client = PaisClient(FakeTransport(store))
+    agent = client.agents.create(
+        AgentCreate(name="a1", model="openai/gpt-oss-120b-4x", index_id="idx_1", index_top_n=5)
+    )
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise PaisServerError("server exploded", status_code=502, request_id="rid-chat-boom")
+
+    monkeypatch.setattr(client.agents, "chat", boom)
+
+    fq = _FakeQ(["first turn fails", ""])  # one try then empty exits
+    monkeypatch.setattr(chat_wf, "questionary", fq)
+    chat_wf.run(client, Settings(), Console(), _preset={"agent_id": agent.id})
+
+    dumps = list(errors_dir.glob("*.json"))
+    assert len(dumps) == 1
+    data = _json.loads(dumps[0].read_text(encoding="utf-8"))
+    assert data["status_code"] == 502
+    assert data["request_id"] == "rid-chat-boom"
+    assert data["prompt_excerpt"] == "first turn fails"
+    assert data["agent_id"] == agent.id
+    assert fq.scripted == []
