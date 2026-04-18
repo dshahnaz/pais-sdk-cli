@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -157,3 +158,115 @@ def test_repro_cleanup_deletes_resources(
         assert "cleanup_agent_error" not in manifest
         assert "cleanup_kb_error" not in manifest
         assert manifest["recipe"]["cleanup"] is True
+
+
+def test_repro_waits_for_indexing_done(
+    runner: CliRunner, fixtures: dict[str, Path], tmp_path: Path
+) -> None:
+    """After v0.8.1, repro triggers + waits for indexing and records final_state."""
+    out = tmp_path / "repro_idx.zip"
+    r = runner.invoke(
+        cli_app,
+        [
+            "repro",
+            "--suites-dir",
+            str(fixtures["suites_dir"]),
+            "--instructions",
+            str(fixtures["instructions"]),
+            "--prompts",
+            str(fixtures["prompt1"]),
+            "--output",
+            str(out),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    with zipfile.ZipFile(out) as z:
+        manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+        idx = manifest.get("indexing")
+        assert idx is not None, f"no indexing block in manifest: {manifest}"
+        assert idx["final_state"] == "DONE"
+        assert "id" in idx
+        assert isinstance(idx.get("duration_ms"), int)
+        # Default binding path: doc-aligned index_id.
+        assert manifest["binding"] == "index_id"
+
+
+def test_repro_aborts_when_indexing_fails(
+    runner: CliRunner,
+    fixtures: dict[str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the indexing ends non-DONE, repro exits 1 and does NOT create the agent."""
+    # Patch the SDK's wait_for_indexing to simulate a FAILED terminal state.
+    from pais.models import Indexing
+    from pais.resources import indexes as _indexes
+
+    def fake_wait(self: Any, kb_id: str, index_id: str, *a: Any, **kw: Any) -> Indexing:
+        return Indexing(
+            id="ing-fail-1",
+            created_at=0,
+            index_id=index_id,
+            state="FAILED",
+            error="simulated parse error",
+        )
+
+    monkeypatch.setattr(_indexes.IndexesResource, "wait_for_indexing", fake_wait)
+
+    # Also spy on agents.create so we can assert it was NOT called after failure.
+    from pais.resources import agents as _agents
+
+    created: list[Any] = []
+    real_create = _agents.AgentsResource.create
+
+    def spy_create(self: Any, *args: Any, **kwargs: Any) -> Any:
+        created.append((args, kwargs))
+        return real_create(self, *args, **kwargs)
+
+    monkeypatch.setattr(_agents.AgentsResource, "create", spy_create)
+
+    out = tmp_path / "repro_fail.zip"
+    r = runner.invoke(
+        cli_app,
+        [
+            "repro",
+            "--suites-dir",
+            str(fixtures["suites_dir"]),
+            "--instructions",
+            str(fixtures["instructions"]),
+            "--prompts",
+            str(fixtures["prompt1"]),
+            "--output",
+            str(out),
+        ],
+    )
+    assert r.exit_code == 1, r.output
+    # Agent must not be created if indexing failed.
+    assert created == []
+
+
+def test_repro_legacy_mcp_tools_flag(
+    runner: CliRunner, fixtures: dict[str, Path], tmp_path: Path
+) -> None:
+    """--legacy-mcp-tools binds via tools[] + records mcp_tool_id in the manifest."""
+    out = tmp_path / "repro_legacy.zip"
+    r = runner.invoke(
+        cli_app,
+        [
+            "repro",
+            "--suites-dir",
+            str(fixtures["suites_dir"]),
+            "--instructions",
+            str(fixtures["instructions"]),
+            "--prompts",
+            str(fixtures["prompt1"]),
+            "--legacy-mcp-tools",
+            "--output",
+            str(out),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    with zipfile.ZipFile(out) as z:
+        manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+        assert manifest["binding"] == "legacy_mcp_tools"
+        assert manifest.get("mcp_tool_id"), "mcp_tool_id missing from manifest"

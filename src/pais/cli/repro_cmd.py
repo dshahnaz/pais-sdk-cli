@@ -36,6 +36,8 @@ from pais.models import (
     ChatMessage,
     IndexCreate,
     KnowledgeBaseCreate,
+    ToolLink,
+    ToolLinkType,
 )
 
 _LOG_DIR = Path.home() / ".pais" / "logs"
@@ -188,6 +190,21 @@ def repro(
         "--include-instructions",
         help="Include the instructions markdown verbatim in the bundle (off by default).",
     ),
+    indexing_timeout: float = typer.Option(
+        300.0,
+        "--indexing-timeout",
+        help="Seconds to wait for indexing to reach DONE (default: 300).",
+    ),
+    legacy_mcp_tools: bool = typer.Option(
+        False,
+        "--legacy-mcp-tools",
+        help=(
+            "Bind the agent via the legacy tools[] with "
+            "PAIS_KNOWLEDGE_BASE_INDEX_SEARCH_TOOL_LINK instead of the "
+            "doc-aligned index_id. Off by default; use only if your "
+            "deployment doesn't retrieve with the documented shape."
+        ),
+    ),
 ) -> None:
     """Stand up KB+index+agent, run prompts, bundle everything for triage."""
     ts = _ts()
@@ -256,16 +273,98 @@ def repro(
             "chunk_size_distribution": ingest_report.chunk_size_distribution,
         }
 
-        # Create agent.
-        agent = client.agents.create(
-            AgentCreate(
-                name=f"repro-{ts}-agent",
-                model=model,
-                instructions=instr_text,
-                index_id=ix.id,
-                index_top_n=index_top_n,
+        # KB defaults to MANUAL index_refresh_policy — documents upload but are
+        # NOT indexed until we POST /indexings. Without this, RAG retrieves
+        # nothing and every bundle is uncomparable to the user's live setup.
+        # See memory: feedback_pais_manual_indexing.md.
+        typer.echo("↻ triggering indexing (MANUAL refresh policy) …", err=True)
+        trigger_started = time.perf_counter()
+        try:
+            indexing = client.indexes.trigger_indexing(kb.id, ix.id)
+            manifest["indexing"] = {"id": indexing.id, "triggered_state": indexing.state}
+            typer.echo(
+                f"↻ waiting for indexing (id={indexing.id}, timeout={indexing_timeout}s) …",
+                err=True,
             )
-        )
+            final = client.indexes.wait_for_indexing(kb.id, ix.id, timeout=indexing_timeout)
+            indexing_duration_ms = int((time.perf_counter() - trigger_started) * 1000)
+            manifest["indexing"].update(
+                {
+                    "final_state": final.state,
+                    "duration_ms": indexing_duration_ms,
+                }
+            )
+        except TimeoutError as e:
+            manifest["indexing_error"] = f"timeout: {e}"
+            typer.echo(f"[error] {e}", err=True)
+            raise typer.Exit(code=1) from e
+        except Exception as e:
+            manifest["indexing_error"] = f"{type(e).__name__}: {e}"
+            typer.echo(f"[error] indexing call failed: {e}", err=True)
+            raise typer.Exit(code=1) from e
+
+        if final.state != "DONE":
+            typer.echo(
+                f"[error] indexing ended with state={final.state}; aborting before agent-create",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        # Create agent. Two binding shapes: doc-aligned index_id (default) or
+        # the legacy PAIS_KNOWLEDGE_BASE_INDEX_SEARCH_TOOL_LINK via tools[]
+        # (opt-in via --legacy-mcp-tools). See memory: project_doc_as_contract.md.
+        if legacy_mcp_tools:
+            typer.echo("↻ discovering MCP KB-search tool for legacy binding …", err=True)
+            mcp_tools_resp = client.mcp_tools.list()
+            kb_search_tools = [
+                t
+                for t in mcp_tools_resp.data
+                if "knowledge base index" in (t.description or "").lower()
+            ]
+            if not kb_search_tools:
+                manifest["binding_error"] = (
+                    "no KB-search MCP tool found; cannot use --legacy-mcp-tools"
+                )
+                typer.echo(
+                    "[error] no MCP tool with 'knowledge base index' in description found",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            # Match test.py:610 — pick the most recent (last) KB-search tool.
+            picked_tool = kb_search_tools[-1]
+            typer.echo(
+                f"↻ legacy binding via MCP tool {picked_tool.id} "
+                f"(of {len(kb_search_tools)} candidates)",
+                err=True,
+            )
+            agent = client.agents.create(
+                AgentCreate(
+                    name=f"repro-{ts}-agent",
+                    model=model,
+                    instructions=instr_text,
+                    tools=[
+                        ToolLink(
+                            link_type=ToolLinkType.PAIS_KNOWLEDGE_BASE_INDEX_SEARCH_TOOL_LINK,
+                            tool_id=picked_tool.id,
+                            top_n=index_top_n,
+                            similarity_cutoff=0.0,
+                        )
+                    ],
+                )
+            )
+            manifest["binding"] = "legacy_mcp_tools"
+            manifest["mcp_tool_id"] = picked_tool.id
+        else:
+            agent = client.agents.create(
+                AgentCreate(
+                    name=f"repro-{ts}-agent",
+                    model=model,
+                    instructions=instr_text,
+                    index_id=ix.id,
+                    index_top_n=index_top_n,
+                )
+            )
+            manifest["binding"] = "index_id"
         manifest["agent_id"] = agent.id
 
         # Run prompts.

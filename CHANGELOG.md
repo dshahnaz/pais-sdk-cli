@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.8.1 · `pais repro` actually indexes before running prompts
+
+### Fixed
+
+- **`pais repro` now triggers and waits for indexing to reach `DONE` before creating the agent.** Field report: after v0.8.0 shipped, the resulting bundles looked "complete" but RAG was silently dead because KBs default to `index_refresh_policy.policy_type="MANUAL"` — the PAIS doc itself spells this out: *"Since you configured our knowledge base with a manual index refresh policy, indexings are not triggered automatically."* The v0.8.0 harness uploaded documents via `ingest_path(...)` but never POSTed `/indexings`, so every `pais repro` run created an agent against an **unindexed** KB and the per-prompt responses reflected no retrieval at all.
+
+  v0.8.1 now invokes `client.indexes.trigger_indexing(kb, ix)` then `client.indexes.wait_for_indexing(kb, ix, timeout=<configurable>)` between ingest and agent-create. If indexing ends with a non-`DONE` state (`FAILED`, `CANCELLED`, or timeout), the command exits 1 **before** agent-create so we don't waste time on a broken index. The final state and duration are captured in `manifest.json` under `indexing`:
+
+  ```json
+  "indexing": {
+    "id": "ing_…",
+    "triggered_state": "PENDING",
+    "final_state": "DONE",
+    "duration_ms": 43210
+  }
+  ```
+
+### Added
+
+- **`--indexing-timeout SECONDS`** — override the 300 s wait budget for slow deployments.
+- **`--legacy-mcp-tools`** — opt-in flag that binds the agent via the legacy `tools=[ToolLink(link_type="PAIS_KNOWLEDGE_BASE_INDEX_SEARCH_TOOL_LINK", tool_id=<MCP_uuid>, …)]` shape instead of the doc-aligned `index_id`. Off by default; use when your deployment doesn't retrieve via the documented shape (see the user's field-proven `test.py:337-404` reference for the exact pattern). The manifest records `"binding": "legacy_mcp_tools"` + the picked `mcp_tool_id` so re-runs are unambiguous and side-by-side comparisons are auditable.
+- **`manifest.binding`** — always records which agent-binding path was taken (`"index_id"` or `"legacy_mcp_tools"`).
+
+### Why this matters
+
+Without this fix, any "`pais repro` bundle" diagnostics coming in were apples-to-oranges against the user's live setup — their production agent went through the proper trigger+wait flow (they'd built that into their own reference script), our harness did not. Bundles from v0.8.1 onward are actually comparable.
+
 ## 0.8.0 · `pais repro` reproducible chat-experiment harness
 
 ### Added
