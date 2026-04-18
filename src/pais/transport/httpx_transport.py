@@ -21,6 +21,23 @@ _log = get_logger("pais.transport")
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 _CHAT_PATH_MARKER = "/chat/completions"
 
+# Header names dropped before any error dump leaves the SDK. Lower-case match.
+_REDACTED_HEADER_NAMES = frozenset({"authorization", "cookie", "set-cookie", "proxy-authorization"})
+
+
+def _safe_response_headers(headers: Any) -> dict[str, str]:
+    """Return response headers as a flat dict, dropping any auth/session headers."""
+    out: dict[str, str] = {}
+    try:
+        items = headers.items() if hasattr(headers, "items") else dict(headers).items()
+    except Exception:
+        return out
+    for key, value in items:
+        if key.lower() in _REDACTED_HEADER_NAMES:
+            continue
+        out[str(key)] = str(value)
+    return out
+
 
 def _is_empty_chat_completion(body: Any) -> bool:
     """True iff a parsed chat-completions body has `choices[0].message.content`
@@ -306,6 +323,7 @@ class HttpxTransport:
                     body,
                     request_id=resp_request_id,
                     retry_after=retry_after,
+                    response_headers=_safe_response_headers(resp.headers),
                 )
 
             if self._is_chat_path(path) and isinstance(body, dict):

@@ -33,11 +33,13 @@ class PaisError(Exception):
         status_code: int | None = None,
         details: list[ErrorDetail] | None = None,
         request_id: str | None = None,
+        response_headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.details = details or []
         self.request_id = request_id
+        self.response_headers = response_headers or {}
 
     def __str__(self) -> str:
         base = super().__str__()
@@ -132,6 +134,7 @@ def error_from_response(
     *,
     request_id: str | None = None,
     retry_after: float | None = None,
+    response_headers: dict[str, str] | None = None,
 ) -> PaisError:
     """Parse a PAIS error response body into the right subclass."""
     details: list[ErrorDetail] = []
@@ -157,6 +160,7 @@ def error_from_response(
         "status_code": status_code,
         "details": details,
         "request_id": request_id,
+        "response_headers": response_headers,
     }
     if cls is PaisRateLimitError:
         return PaisRateLimitError(message, retry_after=retry_after, **kwargs)

@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.8.2 · config templates + agent diagnose + richer error dumps + HF graceful fallback
+
+### The recipe (paste-ready)
+
+For production deployments running `gpt-oss-120b`, agents created with **all 5 server-default fields at `null`** were 502'ing with `AGENT_COMPLETION_FAILED / "Error interacting with GenAI services"` — even on tiny prompts. The fix is to set them explicitly. The CLI shortcut:
+
+```bash
+pais agent create --template field-proven \
+  --name <n> --model openai/gpt-oss-120b --index-id <uuid>
+# resolves to:
+#   completion_role="assistant"
+#   session_max_length=10000
+#   session_summarization_strategy="delete_oldest"
+#   index_reference_format="structured"
+#   chat_system_instruction_mode="system-message"
+#   index_top_n=5
+#   index_similarity_cutoff=0.0
+```
+
+### Added
+
+- **`--template <name>`** on `pais agent create`. Three named templates: `field-proven` (recommended), `minimal`, `custom`. Index templates: `test-suite-bge`, `test-suite-arctic`, `code-rag`, `custom`. KB templates: `local-files-manual`, `custom`. Explicit flags always beat template seeds.
+- **`pais templates list [--kind kb|index|agent|all]`** — prints templates with their default values; copy-paste into shell scripts.
+- **`pais agent dump <id>`** — single-command full agent JSON + `__diagnostic` block listing missing recommended fields and binding mode (`index_id` vs. `tools_legacy`). Bypasses the SDK's pydantic defaults so it shows the truth on the wire.
+- **`pais agent diagnose <id>`** — opinionated pass/fail check. `[ OK ]` / `[MISS]` / `[WARN]` per field, exits `1` on any miss. Surfaces `session_max_length > 50000` as a WARN (it's the history accumulator, NOT the per-turn context window — common confusion).
+- **3 new flags on `pais agent create`**: `--completion-role`, `--index-reference-format`, `--chat-system-instruction-mode`. Default `None`; set them explicitly or via `--template`.
+
+### Improved (zero-config — happens automatically)
+
+- **`chat-errors/<ts>-<rid>.json` is much richer**. New fields per dump (when info is available):
+  - `prompt_token_estimate` — char-based estimate, no HF needed
+  - `request_body` — `{model, max_tokens, temperature, top_p, stream, message_count, total_chars}` actually sent
+  - `response_headers` — passed through from the failing response (auth/cookie headers stripped)
+  - `agent_dump` — inline snapshot of the failing agent's full server config (instructions truncated to 2 KB)
+- **`PaisError` carries `response_headers`** alongside `status_code` / `request_id` / `details`. Transport plumbs them through.
+- **`pais.dev.token_budget` falls back to char-based estimation** when HuggingFace is unreachable (corp networks blocking `huggingface.co`, SSL cert issues, etc.). Emits a single `pais.tokenizer.fallback_chars` warning per process. Splitter / `pais repro` / `pais ingest` no longer die at HF download time.
+
+### Memory
+
+New: `feedback_pais_agent_undocumented_defaults.md` documents the 5-field recipe and the diagnostic path.
+
 ## 0.8.1 · `pais repro` actually indexes before running prompts
 
 ### Fixed
