@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.6 · surface empty-response diagnostics in `pais chat`
+
+### Fixed
+
+- **Empty chat responses no longer render as an empty green panel.** Report from the field (v0.7.5 user loaded a 76 KB prompt via `/file` and got back an empty box with no clue why): the server returned HTTP 200 with `choices[0].message.content = ""`, but the REPL printed it verbatim without showing `finish_reason` or token usage. The chat panel now detects an empty body, switches to a yellow border, and prints `finish_reason=...  tokens in=X out=Y total=Z` plus a one-line hint listing the common causes (context-window overflow → `length`, content filter → `content_filter`, zero-token truncation). Non-empty responses print the same `finish_reason` + usage footer in dim below the panel so users get the signal on every turn.
+- **`/file` large-file warning threshold lowered from 1 MB to 50 KB** (~12 K tokens at 4 chars/token). The warning message now explicitly mentions context-window risk and the possibility of an empty response, instead of just echoing the file size.
+
 ## 0.7.5 · load a file as the chat prompt
 
 ### Added

@@ -18,7 +18,8 @@ from pais.config import Settings
 from pais.models import ChatCompletionRequest, ChatMessage
 
 _FILE_CMD = "/file "
-_LARGE_FILE_BYTES = 1_000_000
+# ~12 K tokens at 4 chars/token — past this, many model context windows are at risk.
+_LARGE_FILE_BYTES = 50_000
 
 
 def _maybe_load_file(raw: str, console: Console) -> str | None:
@@ -40,7 +41,8 @@ def _maybe_load_file(raw: str, console: Console) -> str | None:
     size = len(text.encode("utf-8"))
     if size > _LARGE_FILE_BYTES:
         console.print(
-            f"[yellow]warning:[/yellow] {path.name} is {size // 1024} KB — sending anyway"
+            f"[yellow]warning:[/yellow] {path.name} is {size // 1024} KB (~{size // 4000}K tokens) — "
+            f"may exceed the model's context window; response can come back empty"
         )
     console.print(f"[dim]loaded {size} bytes from {path.name}[/dim]")
     return text
@@ -96,8 +98,28 @@ def run(
         except Exception as e:
             console.print(f"[red]error:[/red] {e}")
             continue
-        text = resp.choices[0].message.content or ""
-        console.print(Panel(text, title="agent", border_style="green"))
+        choice = resp.choices[0]
+        text = choice.message.content or ""
+        usage = resp.usage
+        footer = (
+            f"finish_reason={choice.finish_reason}  "
+            f"tokens in={usage.prompt_tokens} out={usage.completion_tokens} total={usage.total_tokens}"
+        )
+        if not text.strip():
+            console.print(
+                Panel(
+                    f"[yellow](empty response)[/yellow]\n[dim]{footer}[/dim]\n\n"
+                    f"Common causes: prompt exceeded the model's context window "
+                    f"(finish_reason=length), content filter tripped "
+                    f"(finish_reason=content_filter), or the backend truncated to zero tokens. "
+                    f"Try a shorter prompt or a different model.",
+                    title="agent",
+                    border_style="yellow",
+                )
+            )
+        else:
+            console.print(Panel(text, title="agent", border_style="green"))
+            console.print(f"[dim]{footer}[/dim]")
 
 
 WORKFLOW = Workflow(
