@@ -174,6 +174,29 @@ def test_full_flow_against_live_mock(live_server: str, tmp_path) -> None:
     resp = json.loads(r.output)
     assert resp["choices"][0]["message"]["content"]
 
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("# Q\nWhat is the answer?\n", encoding="utf-8")
+    r = runner.invoke(
+        cli_app,
+        ["agent", "chat", agent_id, "--file", str(prompt_file), "--output", "json"],
+    )
+    assert r.exit_code == 0, r.output
+    resp = json.loads(r.output)
+    assert resp["choices"][0]["message"]["content"]
+
+
+def test_agent_chat_message_file_xor(mock_runner: CliRunner, tmp_path: Path) -> None:
+    """One of MESSAGE or --file must be supplied, not both, not neither."""
+    r = mock_runner.invoke(cli_app, ["agent", "chat", "agent_1"])
+    assert r.exit_code != 0
+    assert "exactly one" in (r.output + (r.stderr or "")).lower()
+
+    f = tmp_path / "p.md"
+    f.write_text("hi", encoding="utf-8")
+    r = mock_runner.invoke(cli_app, ["agent", "chat", "agent_1", "hi", "--file", str(f)])
+    assert r.exit_code != 0
+    assert "exactly one" in (r.output + (r.stderr or "")).lower()
+
 
 def test_validation_error_exits_1(live_server: str) -> None:
     """Server-returned 422 must map to exit code 1 (user error)."""

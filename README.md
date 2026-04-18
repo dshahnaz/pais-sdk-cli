@@ -136,8 +136,11 @@ Then every command picks it up:
 ```bash
 pais --profile lab kb list
 pais --profile prod agent chat agent_xx "hello"
+pais --profile prod agent chat agent_xx --file prompt.md    # long prompts from a file
 # or set PAIS_PROFILE=lab once for the whole shell
 ```
+
+Inside the interactive chat (`pais chat`), type `/file <path>` at the `you:` prompt to send a file's contents as your message instead of typing it in.
 
 Precedence (highest first): CLI flag → `PAIS_*` env var → config file → defaults. Discovery order for the file: `--config <path>` → `PAIS_CONFIG` → `./pais.toml` → `~/.pais/config.toml`.
 
