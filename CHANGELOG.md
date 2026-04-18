@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.9 · `pais support-bundle` — one-command artifact zip
+
+### Added
+
+- **`pais support-bundle [--chat AGENT_ID --file prompt.md] [--output bundle.zip]`** — one non-interactive command that runs `pais doctor`, optionally reproduces a failing chat turn (dump goes to `~/.pais/logs/chat-errors/…` as in v0.7.8), then zips together: the latest `doctor-*.md`, every `chat-errors/*.json`, and the rolling `pais.log`. Emits a JSON manifest (`bundle`, `included`, `chat_errors` count, `settings_snapshot`) on stdout so scripts can pick up the zip path. Default output is `/tmp/pais-bundle-<UTC-ts>.zip`. Replaces the manual four-step recipe in the v0.7.8 release notes with a single invocation. Non-secret settings only — `password`, `client_secret`, `bearer_token` are never in the bundle.
+
 ## 0.7.8 · chat-error dumps + `pais doctor` inventory
 
 ### Added
