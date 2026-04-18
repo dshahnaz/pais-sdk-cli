@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.5 · load a file as the chat prompt
+
+### Added
+
+- **Load a file's contents as the user message in `pais chat`.** Long prompts (playbooks, specs, test-suite markdown) are awkward to paste into the multiline input — pasted newlines interact badly with the `⏎⏎ to send` convention and the input is hard to iterate on. Two entry points now accept a path:
+  - Interactive REPL: type `/file <path>` at the `you:` prompt. The file is read as UTF-8 and sent as the turn's message. On read error the loop prints a red `error:` line and re-prompts rather than exiting. A `[dim]loaded N bytes from <name>[/dim]` line confirms the send; files over 1 MB emit a yellow warning but still go through.
+  - One-shot: `pais agent chat <agent_id> --file prompt.md` (short form `-F`, since `-f` is `--force`). The positional `MESSAGE` argument is now optional — exactly one of `MESSAGE` or `--file` must be supplied.
+- Wire shape is unchanged: `ChatMessage.content` is still a `str`; the feature only changes how the CLI produces that string.
+
 ## 0.7.4 · `agent create` 500 on empty tools; session-length CLI flags
 
 ### Fixed

@@ -637,12 +637,24 @@ def agent_create(
 
 
 @agent_app.command("chat")
-def agent_chat(agent_id: str, message: str, output: str = OUTPUT_OPT) -> None:
+def agent_chat(
+    agent_id: str,
+    message: str | None = typer.Argument(None, help="User message. Omit when using --file."),
+    file: Path | None = typer.Option(
+        None, "--file", "-F", help="Read the user message from this file instead of the argument."
+    ),
+    output: str = OUTPUT_OPT,
+) -> None:
+    if (message is None) == (file is None):
+        raise typer.BadParameter("Pass exactly one of MESSAGE (positional) or --file PATH.")
+    content = file.expanduser().read_text(encoding="utf-8") if file is not None else message
+    assert content is not None
+
     def go() -> None:
         with _client() as c:
             resp = c.agents.chat(
                 agent_id,
-                ChatCompletionRequest(messages=[ChatMessage(role="user", content=message)]),
+                ChatCompletionRequest(messages=[ChatMessage(role="user", content=content)]),
             )
             if output == "table":
                 typer.echo(resp.choices[0].message.content or "")

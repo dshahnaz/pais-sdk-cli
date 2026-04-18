@@ -68,3 +68,58 @@ def test_chat_one_turn_then_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     chat_wf.run(client, Settings(), Console(), _preset={"agent_id": agent.id})
     # Both scripted answers consumed.
     assert fq.scripted == []
+
+
+def test_chat_file_shortcut_loads_and_sends(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """`/file <path>` reads the file and uses its contents as the chat message."""
+    store = Store()
+    client = PaisClient(FakeTransport(store))
+    agent = client.agents.create(
+        AgentCreate(name="a1", model="openai/gpt-oss-120b-4x", index_id="idx_1", index_top_n=5)
+    )
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("# Task\nSummarize the Access Management suite.\n", encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+    real_chat = client.agents.chat
+
+    def spy_chat(agent_id: str, request: Any) -> Any:
+        captured["content"] = request.messages[0].content
+        return real_chat(agent_id, request)
+
+    monkeypatch.setattr(client.agents, "chat", spy_chat)
+
+    fq = _FakeQ([f"/file {prompt_file}", ""])
+    monkeypatch.setattr(chat_wf, "questionary", fq)
+    chat_wf.run(client, Settings(), Console(), _preset={"agent_id": agent.id})
+
+    # File contents become the user message verbatim (ignoring a possible trailing newline).
+    assert captured["content"].rstrip("\n") == "# Task\nSummarize the Access Management suite."
+    assert fq.scripted == []
+
+
+def test_chat_file_shortcut_missing_file_continues(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Missing path prints an error and loops; next empty input exits. No LLM call."""
+    store = Store()
+    client = PaisClient(FakeTransport(store))
+    agent = client.agents.create(
+        AgentCreate(name="a1", model="openai/gpt-oss-120b-4x", index_id="idx_1", index_top_n=5)
+    )
+    called = {"n": 0}
+    real_chat = client.agents.chat
+
+    def spy_chat(agent_id: str, request: Any) -> Any:
+        called["n"] += 1
+        return real_chat(agent_id, request)
+
+    monkeypatch.setattr(client.agents, "chat", spy_chat)
+
+    missing = tmp_path / "nope.md"
+    fq = _FakeQ([f"/file {missing}", ""])
+    monkeypatch.setattr(chat_wf, "questionary", fq)
+    chat_wf.run(client, Settings(), Console(), _preset={"agent_id": agent.id})
+
+    assert called["n"] == 0
+    assert fq.scripted == []
