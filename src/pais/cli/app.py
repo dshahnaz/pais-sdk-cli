@@ -592,6 +592,18 @@ def agent_create(
         hidden=True,
         help="[legacy] MCP tool id of a KB-index-search tool; prefer --index-id",
     ),
+    session_max_length: int | None = typer.Option(
+        None,
+        "--session-max-length",
+        help="Max tokens the agent keeps in session history before summarization. "
+        "Omit to use the server default.",
+    ),
+    session_summarization_strategy: str | None = typer.Option(
+        None,
+        "--session-summarization-strategy",
+        help="How the agent trims session history (e.g. 'delete_oldest'). "
+        "Omit to use the server default.",
+    ),
     output: str = OUTPUT_OPT,
 ) -> None:
     def go() -> None:
@@ -614,7 +626,9 @@ def agent_create(
                     index_id=index_id,
                     index_top_n=index_top_n if index_id else None,
                     index_similarity_cutoff=(index_similarity_cutoff if index_id else None),
-                    tools=tools,
+                    tools=tools or None,
+                    session_max_length=session_max_length,
+                    session_summarization_strategy=session_summarization_strategy,
                 )
             )
             render(agent, fmt=output)
