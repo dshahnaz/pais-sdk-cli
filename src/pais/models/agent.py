@@ -49,17 +49,23 @@ class AgentCreate(PaisModel):
     description: str | None = None
     model: str
     instructions: str | None = None
-    completion_role: str = "assistant"
-    session_max_length: int = 10000
-    session_summarization_strategy: str = "delete_oldest"
-    index_reference_format: str | None = "structured"
-    chat_system_instruction_mode: str = "system-message"
+    completion_role: str | None = None
+    # Session controls are server-owned; omit from the wire when the caller
+    # doesn't care so PAIS applies its own defaults. Observed: sending
+    # session_max_length=10000 alongside index_id triggers 500 on some
+    # deployments where 4096 (server default) succeeds.
+    session_max_length: int | None = None
+    session_summarization_strategy: str | None = None
+    index_reference_format: str | None = None
+    chat_system_instruction_mode: str | None = None
     # Doc-aligned: prefer this for new code.
     index_id: str | None = None
     index_top_n: int | None = None
     index_similarity_cutoff: float | None = None
-    # Legacy fallback.
-    tools: list[ToolLink] = []
+    # Legacy fallback. `None` (not `[]`) so model_dump(exclude_none=True)
+    # keeps it off the wire when not set — PAIS 500s on `tools: []`
+    # combined with `index_id`.
+    tools: list[ToolLink] | None = None
 
 
 class AgentUpdate(PaisModel):

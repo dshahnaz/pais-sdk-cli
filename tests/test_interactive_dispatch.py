@@ -252,6 +252,8 @@ def test_dispatch_filters_picker_scratch_keys(
         index_top_n: int = 5,
         index_similarity_cutoff: float = 0.0,
         kb_search_tool: Any = None,
+        session_max_length: int | None = None,
+        session_summarization_strategy: str | None = None,
         output: str = "table",
     ) -> None:
         received.update(

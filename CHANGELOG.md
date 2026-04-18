@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.4 · `agent create` 500 on empty tools; session-length CLI flags
+
+### Fixed
+
+- **`pais agent create` no longer 500s against real PAIS when `--index-id` is used.** Root cause: `AgentCreate.tools` defaulted to `[]` and the SDK serializes with `model_dump(exclude_none=True)`, which drops `None` but not empty containers — so an empty `tools: []` always rode onto the wire alongside `index_id`, and some PAIS deployments return HTTP 500 on that combination (a minimal `curl` with the same name/model/index_id succeeds 201). `tools` is now `list[ToolLink] | None = None`, so it stays off the wire unless the caller explicitly populates it (legacy MCP path via `--kb-search-tool` is unchanged). Same treatment applied to `session_max_length`, `session_summarization_strategy`, `index_reference_format`, `chat_system_instruction_mode`, and `completion_role`: defaults now `None` so the server owns the defaults instead of the SDK hard-coding `10000` / `"delete_oldest"` / `"structured"` / `"system-message"` / `"assistant"`. A new `tests/test_agent_create_wire_shape.py` pins the exact JSON body shape via a spy transport.
+
+### Added
+
+- **`pais agent create --session-max-length` and `--session-summarization-strategy`** — tune the agent's in-session history window and trim strategy from the CLI. Omit to use the server's default (previously the SDK silently forced 10000 / `"delete_oldest"`). The options also show up in the interactive shell's optional-review screen.
+
 ## 0.7.3 · `agent create` kb_ref leak; log shell exceptions to file
 
 ### Fixed
