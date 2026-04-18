@@ -89,8 +89,8 @@ class ChatMessage(PaisModel):
 class ChatCompletionRequest(PaisModel):
     messages: list[ChatMessage]
     model: str | None = None
-    temperature: float = 0.7
-    max_tokens: int | None = 500
+    temperature: float | None = None
+    max_tokens: int | None = None
     stream: bool = False
     top_p: float | None = None
 

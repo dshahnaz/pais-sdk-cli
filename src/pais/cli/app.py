@@ -24,6 +24,7 @@ from pais.cli.doctor_cmd import doctor as doctor_cmd
 from pais.cli.ensure_cmd import kb_ensure
 from pais.cli.ingest_cmd import alias_app, ingest_app, splitters_app
 from pais.cli.logs_cmd import app as logs_app
+from pais.cli.repro_cmd import repro as repro_cmd
 from pais.cli.shell_cmd import shell as shell_cmd
 from pais.cli.status_cmd import status as status_cmd
 from pais.cli.support_bundle_cmd import support_bundle as support_bundle_cmd
@@ -72,6 +73,10 @@ app.command(
     "support-bundle",
     help="Zip doctor + chat errors + pais.log into a single shareable file.",
 )(support_bundle_cmd)
+app.command(
+    "repro",
+    help="Stand up KB+index+agent from fixtures, run prompts, bundle results for triage.",
+)(repro_cmd)
 app.add_typer(logs_app, name="logs")
 
 
