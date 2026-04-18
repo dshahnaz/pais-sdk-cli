@@ -76,6 +76,7 @@ class PaisClient:
             retry_max_delay=settings.retry_max_delay,
             chat_cold_start_retries=settings.chat_cold_start_retries,
             chat_cold_start_delay=settings.chat_cold_start_delay,
+            chat_retry_on_empty=settings.chat_retry_on_empty,
         )
         return cls(transport)
 
