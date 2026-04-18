@@ -70,7 +70,6 @@ def test_bundle_includes_existing_chat_errors(
 
 
 def test_bundle_requires_file_with_chat(runner: CliRunner, tmp_path: Path) -> None:
-    """--chat without --file errors out (typer.BadParameter)."""
+    """--chat without --file errors out (typer.BadParameter → exit code 2)."""
     r = runner.invoke(cli_app, ["support-bundle", "--chat", "agent_1"])
-    assert r.exit_code != 0
-    assert "--file" in (r.output + (r.stderr or ""))
+    assert r.exit_code == 2  # typer's parse-error code
