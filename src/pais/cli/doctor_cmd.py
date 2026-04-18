@@ -46,6 +46,8 @@ class DoctorReport:
     log_file: str | None
     timestamp: str
     probes: list[_ProbeResult] = field(default_factory=list)
+    inventory: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    settings_dump: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +69,8 @@ class DoctorReport:
                 }
                 for p in self.probes
             ],
+            "inventory": self.inventory,
+            "settings": self.settings_dump,
         }
 
     def to_markdown(self) -> str:
@@ -93,6 +97,32 @@ class DoctorReport:
             if p.request_id:
                 detail += f" · request_id={p.request_id}"
             lines.append(f"| {p.name} | {mark} | {_redact_value(detail)} |")
+
+        if self.settings_dump:
+            lines.append("")
+            lines.append("## Settings (non-secret)")
+            lines.append("")
+            lines.append("| key | value |")
+            lines.append("|---|---|")
+            for key, value in self.settings_dump.items():
+                lines.append(f"| {key} | {_redact_value(str(value))} |")
+
+        for section, rows in self.inventory.items():
+            lines.append("")
+            lines.append(f"<details><summary>{section} ({len(rows)})</summary>")
+            lines.append("")
+            if rows:
+                columns = list(rows[0].keys())
+                lines.append("| " + " | ".join(columns) + " |")
+                lines.append("|" + "|".join(["---"] * len(columns)) + "|")
+                for row in rows:
+                    cells = [_redact_value(str(row.get(c, ""))) for c in columns]
+                    lines.append("| " + " | ".join(cells) + " |")
+            else:
+                lines.append("_(none)_")
+            lines.append("")
+            lines.append("</details>")
+
         return "\n".join(lines) + "\n"
 
 
@@ -114,41 +144,83 @@ def doctor(output: str = OUTPUT_OPT) -> None:
         timestamp=now,
     )
 
+    report.settings_dump = _dump_settings(settings)
+
     # --- probes ---
     with settings.build_client() as client:
         # 1. Reachability (HEAD on base URL — same as status_cmd)
         _probe(report, "server_reachable", lambda: _head_probe(settings))
 
         # 2. knowledge_bases list
-        _probe(
-            report,
-            "knowledge_bases",
-            lambda: f"list returned {len(client.knowledge_bases.list().data)}",
-        )
+        def _kb_probe() -> str:
+            kbs = client.knowledge_bases.list().data
+            report.inventory["knowledge_bases"] = [
+                {
+                    "id": kb.id,
+                    "name": getattr(kb, "name", None),
+                    "created_at": getattr(kb, "created_at", None),
+                }
+                for kb in kbs
+            ]
+            return f"list returned {len(kbs)}"
+
+        _probe(report, "knowledge_bases", _kb_probe)
 
         # 3. indexes (per KB)
         def _indexes_probe() -> str:
             kbs = client.knowledge_bases.list().data
-            total = 0
+            rows: list[dict[str, Any]] = []
             for kb in kbs:
-                total += len(client.indexes.list(kb.id).data)
-            return f"all {len(kbs)} KBs scanned; {total} indexes"
+                for ix in client.indexes.list(kb.id).data:
+                    rows.append(
+                        {
+                            "id": ix.id,
+                            "kb_id": kb.id,
+                            "kb_name": getattr(kb, "name", None),
+                            "name": getattr(ix, "name", None),
+                            "embeddings_model": getattr(ix, "embeddings_model", None),
+                            "chunk_size": getattr(ix, "chunk_size", None),
+                            "chunk_overlap": getattr(ix, "chunk_overlap", None),
+                            "status": getattr(ix, "status", None),
+                        }
+                    )
+            report.inventory["indexes"] = rows
+            return f"all {len(kbs)} KBs scanned; {len(rows)} indexes"
 
         _probe(report, "indexes", _indexes_probe)
 
         # 4. agents
-        _probe(
-            report,
-            "agents",
-            lambda: f"list returned {len(client.agents.list().data)}",
-        )
+        def _agents_probe() -> str:
+            agents = client.agents.list().data
+            report.inventory["agents"] = [
+                {
+                    "id": a.id,
+                    "name": getattr(a, "name", None),
+                    "model": getattr(a, "model", None),
+                    "index_id": getattr(a, "index_id", None),
+                    "index_top_n": getattr(a, "index_top_n", None),
+                    "session_max_length": getattr(a, "session_max_length", None),
+                }
+                for a in agents
+            ]
+            return f"list returned {len(agents)}"
+
+        _probe(report, "agents", _agents_probe)
 
         # 5. models
-        _probe(
-            report,
-            "models",
-            lambda: f"list returned {len(client.models.list().data)}",
-        )
+        def _models_probe() -> str:
+            models = client.models.list().data
+            report.inventory["models"] = [
+                {
+                    "id": m.id,
+                    "model_type": getattr(m, "model_type", None),
+                    "model_engine": getattr(m, "model_engine", None),
+                }
+                for m in models
+            ]
+            return f"list returned {len(models)}"
+
+        _probe(report, "models", _models_probe)
 
         # 6. mcp_tools
         _probe(
@@ -239,6 +311,37 @@ def _probe(report: DoctorReport, name: str, fn: Callable[[], str]) -> None:
                 error=f"{type(e).__name__}: {_redact_value(str(e))}",
             )
         )
+
+
+_SAFE_SETTING_KEYS = (
+    "mode",
+    "base_url",
+    "auth",
+    "verify_ssl",
+    "connect_timeout",
+    "read_timeout",
+    "total_timeout",
+    "retry_max_attempts",
+    "retry_base_delay",
+    "retry_max_delay",
+    "chat_cold_start_retries",
+    "chat_cold_start_delay",
+    "chat_retry_on_empty",
+    "log_level",
+    "log_json_console",
+    "profile",
+)
+
+
+def _dump_settings(settings: Settings) -> dict[str, Any]:
+    """Dump only the allowlisted non-secret settings so a new SecretStr
+    field added later cannot accidentally leak into shared reports."""
+    out: dict[str, Any] = {}
+    for key in _SAFE_SETTING_KEYS:
+        if hasattr(settings, key):
+            value = getattr(settings, key)
+            out[key] = str(value) if value is not None else None
+    return out
 
 
 def _head_probe(settings: Settings) -> str:

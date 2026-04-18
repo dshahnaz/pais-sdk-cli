@@ -652,10 +652,20 @@ def agent_chat(
 
     def go() -> None:
         with _client() as c:
-            resp = c.agents.chat(
-                agent_id,
-                ChatCompletionRequest(messages=[ChatMessage(role="user", content=content)]),
-            )
+            try:
+                resp = c.agents.chat(
+                    agent_id,
+                    ChatCompletionRequest(messages=[ChatMessage(role="user", content=content)]),
+                )
+            except Exception as e:
+                from pais.cli._error_dump import dump_chat_error
+
+                try:
+                    dump_path = dump_chat_error(e, agent_id=agent_id, prompt=content or "")
+                    typer.echo(f"full detail → {dump_path}", err=True)
+                except Exception:
+                    pass
+                raise
             if output == "table":
                 typer.echo(resp.choices[0].message.content or "")
             else:
