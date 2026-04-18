@@ -244,3 +244,148 @@ def test_stream_yields_bytes_and_errors_on_4xx() -> None:
 
     with pytest.raises(PaisAuthError):
         list(t.stream("POST", "/bad"))
+
+
+CHAT_PATH = "/compatibility/openai/v1/agents/a1/chat/completions"
+
+
+def _empty_chat_body() -> dict[str, Any]:
+    return {
+        "id": "chatcmpl-empty",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "m",
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": ""}, "finish_reason": "stop"}
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 0, "total_tokens": 10},
+    }
+
+
+def _full_chat_body() -> dict[str, Any]:
+    return {
+        "id": "chatcmpl-ok",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "m",
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11},
+    }
+
+
+def test_chat_empty_content_triggers_retry() -> None:
+    """200 with empty content on a chat path triggers one more attempt."""
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(200, json=_empty_chat_body())
+        return httpx.Response(200, json=_full_chat_body())
+
+    t = _make_transport(
+        handler,
+        retry_max_attempts=1,
+        chat_cold_start_retries=3,
+        chat_cold_start_delay=0.0,
+        retry_base_delay=0.0,
+    )
+    resp = t.request("POST", CHAT_PATH, json={"messages": []})
+    assert resp.ok
+    assert calls["n"] == 2
+    assert resp.body["choices"][0]["message"]["content"] == "hi"
+
+
+def test_chat_empty_content_exhausts_retries_then_returns() -> None:
+    """All attempts empty → caller gets the last (empty) response, no raise."""
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=_empty_chat_body())
+
+    t = _make_transport(
+        handler,
+        retry_max_attempts=1,
+        chat_cold_start_retries=3,
+        chat_cold_start_delay=0.0,
+        retry_base_delay=0.0,
+    )
+    resp = t.request("POST", CHAT_PATH, json={"messages": []})
+    assert resp.ok
+    assert calls["n"] == 3
+    assert resp.body["choices"][0]["message"]["content"] == ""
+
+
+def test_non_chat_200_empty_body_not_special_cased() -> None:
+    """200 empty body on a non-chat path returns immediately — no retry."""
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json={})
+
+    t = _make_transport(
+        handler,
+        retry_max_attempts=4,
+        chat_cold_start_retries=4,
+        chat_cold_start_delay=0.0,
+        retry_base_delay=0.0,
+    )
+    resp = t.request("GET", "/knowledge-bases/kb_1")
+    assert resp.ok
+    assert calls["n"] == 1
+
+
+def test_chat_retry_on_empty_disabled() -> None:
+    """chat_retry_on_empty=False → empty chat 200 returns unchanged without retry."""
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=_empty_chat_body())
+
+    t = _make_transport(
+        handler,
+        retry_max_attempts=1,
+        chat_cold_start_retries=3,
+        chat_cold_start_delay=0.0,
+        chat_retry_on_empty=False,
+        retry_base_delay=0.0,
+    )
+    resp = t.request("POST", CHAT_PATH, json={"messages": []})
+    assert resp.ok
+    assert calls["n"] == 1
+
+
+def test_pais_response_chat_log_emits_diagnostic_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful chat 200 emits `pais.response.chat` with finish_reason + tokens."""
+    from pais.transport import httpx_transport as ht
+
+    calls: list[dict[str, Any]] = []
+    real_info = ht._log.info
+
+    def spy_info(event: str, **kw: Any) -> None:
+        if event == "pais.response.chat":
+            calls.append(kw)
+        real_info(event, **kw)
+
+    monkeypatch.setattr(ht._log, "info", spy_info)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_full_chat_body())
+
+    t = _make_transport(handler)
+    t.request("POST", CHAT_PATH, json={"messages": []})
+
+    assert len(calls) == 1
+    kw = calls[0]
+    assert kw["finish_reason"] == "stop"
+    assert kw["content_len"] == 2
+    assert kw["total_tokens"] == 11
+    assert kw["prompt_tokens"] == 10
+    assert kw["completion_tokens"] == 1

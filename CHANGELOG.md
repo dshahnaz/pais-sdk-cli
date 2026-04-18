@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.7 · auto-retry empty chat 200s + `pais.response.chat` diagnostics
+
+### Fixed
+
+- **`pais chat` no longer silently returns empty responses after a cold start.** Root cause (reported in the field): some PAIS deployments accept a chat request before the vLLM worker is fully warm and return `HTTP 200` with an empty `choices[0].message.content` — the existing cold-start retry loop only fires on `502`, so the empty body slipped through and the REPL drew an empty panel (or a script got no text to act on). The transport now also retries on `200` + empty-content on chat paths, reusing the same `chat_cold_start_delay` backoff and the shared `max_attempts` budget. Emits a `pais.request.empty_content_retry` warning so every auto-retry is auditable in `~/.pais/logs/pais.log`.
+- Shape detection is conservative: only retries when `choices[0].message.content` is explicitly present and empty/whitespace. Unknown or incomplete bodies (missing `choices`, non-string `content`, etc.) return through unchanged — we don't hammer the server on responses we can't classify.
+
+### Added
+
+- **`pais.response.chat` log line** emitted at INFO level on every chat-path success, carrying `finish_reason`, `content_len`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `path`, `request_id`. Makes empty-response diagnosis recoverable for scripted / non-interactive callers and surfaces cleanly in `pais doctor` / `pais logs tail`. Content text itself is never logged.
+- **`PAIS_CHAT_RETRY_ON_EMPTY` (env) / `chat_retry_on_empty` (config)** — opt out of the empty-content retry when you need raw behavior (e.g. debugging a content-filter refusal that legitimately returns empty text). Default `true`.
+- *(Consolidates unreleased v0.7.6)* **Empty-response diagnostics in the REPL.** `pais chat` now prints `finish_reason=... tokens in=X out=Y total=Z` in dim below every turn, and switches to a yellow warning panel with likely-cause hints (context window, content filter, zero-token truncation) when content is empty. `/file`'s large-file threshold dropped 1 MB → 50 KB (~12 K tokens) with a context-window-specific warning.
+
+### Changed
+
+- The chat-path retry budget is shared between the existing 502 cold-start branch and the new empty-content branch — total chat attempts still bounded at `max(retry_max_attempts, chat_cold_start_retries)` (default 3). Operators tuning `retry_max_attempts` should size accordingly.
+
 ## 0.7.6 · surface empty-response diagnostics in `pais chat`
 
 ### Fixed

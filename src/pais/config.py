@@ -113,6 +113,7 @@ class Settings(BaseSettings):
     retry_max_delay: float = 10.0
     chat_cold_start_retries: int = 3
     chat_cold_start_delay: float = 3.0
+    chat_retry_on_empty: bool = True
 
     # Logging
     log_level: str = "INFO"

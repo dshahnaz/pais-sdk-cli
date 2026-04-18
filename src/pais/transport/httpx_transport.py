@@ -21,6 +21,30 @@ _log = get_logger("pais.transport")
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 _CHAT_PATH_MARKER = "/chat/completions"
 
+
+def _is_empty_chat_completion(body: Any) -> bool:
+    """True iff a parsed chat-completions body has `choices[0].message.content`
+    empty or whitespace-only. Returns False for unknown / incomplete shapes so
+    we never retry on bodies we don't recognize.
+    """
+    if not isinstance(body, dict):
+        return False
+    choices = body.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return False
+    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    if not isinstance(message, dict):
+        return False
+    if "content" not in message:
+        return False
+    content = message.get("content")
+    if content is None:
+        return True
+    if not isinstance(content, str):
+        return False
+    return not content.strip()
+
+
 # Process-local set of base URLs for which we've already emitted a
 # `pais.tls.verification_disabled` warning. Prevents the same line from
 # spamming the terminal every time a new `HttpxTransport` is constructed
@@ -43,6 +67,7 @@ class HttpxTransport:
         retry_max_delay: float = 10.0,
         chat_cold_start_retries: int = 3,
         chat_cold_start_delay: float = 3.0,
+        chat_retry_on_empty: bool = True,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.auth: AuthStrategy = auth or NoAuth()
@@ -52,6 +77,7 @@ class HttpxTransport:
         self.retry_max_delay = retry_max_delay
         self.chat_cold_start_retries = chat_cold_start_retries
         self.chat_cold_start_delay = chat_cold_start_delay
+        self.chat_retry_on_empty = chat_retry_on_empty
         self._total_timeout = total_timeout
 
         if not verify_ssl:
@@ -250,6 +276,24 @@ class HttpxTransport:
                 time.sleep(self.chat_cold_start_delay)
                 continue
 
+            # Chat empty-content: 200 with `choices[0].message.content` empty is
+            # another cold-start artifact — the worker accepted the prompt before
+            # the model was warm. Retry once with the same cold-start backoff.
+            if (
+                self.chat_retry_on_empty
+                and resp.status_code == 200
+                and self._is_chat_path(path)
+                and attempt < max_attempts
+                and _is_empty_chat_completion(body)
+            ):
+                _log.warning(
+                    "pais.request.empty_content_retry",
+                    attempt=attempt,
+                    request_id=resp_request_id,
+                )
+                time.sleep(self.chat_cold_start_delay)
+                continue
+
             if resp.status_code in RETRYABLE_STATUSES and attempt < max_attempts:
                 retry_after = self._parse_retry_after(resp.headers.get("Retry-After"))
                 self._sleep_for(attempt, retry_after)
@@ -263,6 +307,25 @@ class HttpxTransport:
                     request_id=resp_request_id,
                     retry_after=retry_after,
                 )
+
+            if self._is_chat_path(path) and isinstance(body, dict):
+                try:
+                    choice0 = (body.get("choices") or [{}])[0]
+                    message = choice0.get("message") or {}
+                    usage = body.get("usage") or {}
+                    content = message.get("content") or ""
+                    _log.info(
+                        "pais.response.chat",
+                        path=path,
+                        request_id=resp_request_id,
+                        finish_reason=choice0.get("finish_reason"),
+                        content_len=len(content),
+                        prompt_tokens=usage.get("prompt_tokens", 0),
+                        completion_tokens=usage.get("completion_tokens", 0),
+                        total_tokens=usage.get("total_tokens", 0),
+                    )
+                except Exception:
+                    pass
 
             return Response(
                 status_code=resp.status_code,
