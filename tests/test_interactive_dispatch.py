@@ -254,6 +254,10 @@ def test_dispatch_filters_picker_scratch_keys(
         kb_search_tool: Any = None,
         session_max_length: int | None = None,
         session_summarization_strategy: str | None = None,
+        completion_role: str | None = None,
+        index_reference_format: str | None = None,
+        chat_system_instruction_mode: str | None = None,
+        template: str | None = None,
         output: str = "table",
     ) -> None:
         received.update(

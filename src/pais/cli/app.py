@@ -7,6 +7,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -614,8 +615,54 @@ def agent_create(
         help="How the agent trims session history (e.g. 'delete_oldest'). "
         "Omit to use the server default.",
     ),
+    completion_role: str | None = typer.Option(
+        None,
+        "--completion-role",
+        help="Role label assigned to LLM responses (e.g. 'assistant'). "
+        "Omit to use the server default.",
+    ),
+    index_reference_format: str | None = typer.Option(
+        None,
+        "--index-reference-format",
+        help="How retrieved chunks are formatted in the prompt envelope (e.g. 'structured'). "
+        "Omit to use the server default.",
+    ),
+    chat_system_instruction_mode: str | None = typer.Option(
+        None,
+        "--chat-system-instruction-mode",
+        help="How `instructions` is routed into the prompt (e.g. 'system-message'). "
+        "Omit to use the server default.",
+    ),
+    template: str | None = typer.Option(
+        None,
+        "--template",
+        help=(
+            "Apply a config template (run `pais templates list` to see options). "
+            "'field-proven' is the recommended starting point on production deployments. "
+            "Explicit flags always win over template seeds."
+        ),
+    ),
     output: str = OUTPUT_OPT,
 ) -> None:
+    from pais.cli._templates import apply_template
+
+    overrides = {
+        "completion_role": completion_role,
+        "session_max_length": session_max_length,
+        "session_summarization_strategy": session_summarization_strategy,
+        "index_reference_format": index_reference_format,
+        "chat_system_instruction_mode": chat_system_instruction_mode,
+        "index_top_n": index_top_n if index_id else None,
+        "index_similarity_cutoff": index_similarity_cutoff if index_id else None,
+    }
+    if template:
+        try:
+            resolved = apply_template("agent", template, overrides)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
+    else:
+        resolved = {k: v for k, v in overrides.items() if v is not None}
+
     def go() -> None:
         with _client() as c:
             tools: list[ToolLink] = []
@@ -624,8 +671,8 @@ def agent_create(
                     ToolLink(
                         link_type=ToolLinkType.PAIS_KNOWLEDGE_BASE_INDEX_SEARCH_TOOL_LINK,
                         tool_id=kb_search_tool,
-                        top_n=index_top_n,
-                        similarity_cutoff=index_similarity_cutoff,
+                        top_n=resolved.get("index_top_n", 5),
+                        similarity_cutoff=resolved.get("index_similarity_cutoff", 0.0),
                     )
                 )
             agent = c.agents.create(
@@ -634,11 +681,8 @@ def agent_create(
                     model=model,
                     instructions=instructions,
                     index_id=index_id,
-                    index_top_n=index_top_n if index_id else None,
-                    index_similarity_cutoff=(index_similarity_cutoff if index_id else None),
                     tools=tools or None,
-                    session_max_length=session_max_length,
-                    session_summarization_strategy=session_summarization_strategy,
+                    **resolved,
                 )
             )
             render(agent, fmt=output)
@@ -692,6 +736,116 @@ def agent_delete(agent_id: str) -> None:
             typer.echo(f"deleted {agent_id}")
 
     _run(go)
+
+
+_RECOMMENDED_AGENT_DEFAULTS = {
+    "completion_role": "assistant",
+    "session_max_length": 10000,
+    "session_summarization_strategy": "delete_oldest",
+    "index_reference_format": "structured",
+    "chat_system_instruction_mode": "system-message",
+}
+
+
+def _fetch_agent_raw(client: PaisClient, agent_id: str) -> dict[str, Any]:
+    """Fetch the agent record as the server returned it — bypassing the
+    SDK's `Agent` pydantic model, which fills the 5 recommended fields with
+    its own defaults at validation time and would mask server-side absence."""
+    raw = client.agents._get_json(f"{client.agents.path}/{agent_id}")
+    if not isinstance(raw, dict):
+        raise RuntimeError(f"unexpected agent payload shape: {type(raw).__name__}")
+    return raw
+
+
+@agent_app.command("dump")
+def agent_dump(agent_id: str) -> None:
+    """Dump the agent's full server config + diagnostic block as JSON.
+
+    Designed for sharing with infra. Highlights any of the 5 recommended
+    fields that are missing on this agent.
+    """
+    import json as _json
+
+    def go() -> None:
+        with _client() as c:
+            data = _fetch_agent_raw(c, agent_id)
+            missing = [
+                k for k, v in _RECOMMENDED_AGENT_DEFAULTS.items() if data.get(k) in (None, "")
+            ]
+            binding = (
+                "tools_legacy"
+                if data.get("tools")
+                else ("index_id" if data.get("index_id") else "none")
+            )
+            data["__diagnostic"] = {
+                "missing_recommended_fields": missing,
+                "binding": binding,
+                "instructions_chars": len(data.get("instructions") or ""),
+            }
+            typer.echo(_json.dumps(data, indent=2, default=str))
+
+    _run(go)
+
+
+@agent_app.command("diagnose")
+def agent_diagnose(agent_id: str) -> None:
+    """Score the agent against the field-proven recipe; exit 1 on any miss."""
+
+    def go() -> None:
+        with _client() as c:
+            data = _fetch_agent_raw(c, agent_id)
+            typer.echo(f"Agent {agent_id} diagnosis:")
+            green = True
+            for key, recommended in _RECOMMENDED_AGENT_DEFAULTS.items():
+                actual = data.get(key)
+                if actual in (None, ""):
+                    typer.echo(f"  [MISS] {key} is null  (recommend: {recommended!r})")
+                    green = False
+                elif key == "session_max_length" and isinstance(actual, int) and actual > 50000:
+                    typer.echo(
+                        f"  [WARN] {key} = {actual} (recommend: {recommended} — "
+                        "session_max_length is the history accumulator, NOT the per-turn context window)"
+                    )
+                else:
+                    typer.echo(f"  [ OK ] {key} = {actual!r}")
+            binding = (
+                "tools_legacy"
+                if data.get("tools")
+                else ("index_id" if data.get("index_id") else "none")
+            )
+            typer.echo(f"  [INFO] binding = {binding}")
+            if not green:
+                typer.echo(
+                    "\nFix: pais agent create --template field-proven … (or recreate this agent "
+                    "with the recommended values)"
+                )
+                raise typer.Exit(code=1)
+
+    _run(go)
+
+
+# --- Templates ----------------------------------------------------------------
+templates_app = typer.Typer(help="Config templates for KB / index / agent create.")
+app.add_typer(templates_app, name="templates")
+
+
+@templates_app.command("list")
+def templates_list(
+    kind: str = typer.Option("all", "--kind", help="Filter: all | kb | index | agent"),
+) -> None:
+    """List available config templates with their seed defaults."""
+    import json as _json
+
+    from pais.cli._templates import AGENT_TEMPLATES, INDEX_TEMPLATES, KB_TEMPLATES
+
+    by_kind = {"kb": KB_TEMPLATES, "index": INDEX_TEMPLATES, "agent": AGENT_TEMPLATES}
+    chosen = by_kind if kind == "all" else {kind: by_kind[kind]}
+    for k, items in chosen.items():
+        typer.echo(f"\n[{k}]")
+        for t in items:
+            typer.echo(f"  {t.name:24s} {t.description}")
+            for key, value in t.defaults.items():
+                typer.echo(f"      {key} = {_json.dumps(value, default=str)}")
 
 
 # --- MCP + models -------------------------------------------------------------
